@@ -69,7 +69,7 @@ export default function Notificaciones() {
           const noti = JSON.parse(e.data);
           setLista((previo) => [noti, ...previo].slice(0, 30));
           setNoLeidas((n) => n + 1);
-          toast(noti.titulo, { icon: '🔔', duration: 5000 });
+          toast(noti.titulo, { duration: 5000 });
         } catch { /* evento malformado */ }
       });
 

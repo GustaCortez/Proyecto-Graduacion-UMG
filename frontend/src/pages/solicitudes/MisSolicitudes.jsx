@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import api from '../../services/api';
-import { FilePlus, Clock, CheckCircle, XCircle, Paperclip, Upload, Trash2, Download, Umbrella } from 'lucide-react';
+import { FilePlus, Paperclip, Upload, Trash2, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const colores = { 'Pendiente': '#f59e0b', 'En revision': '#3b82f6', 'Aprobada': '#22c55e', 'Rechazada': '#ef4444', 'Cancelada': '#94a3b8' };
@@ -139,24 +139,21 @@ export default function MisSolicitudes() {
 
       <div style={s.resumen}>
         <div style={{ ...s.stat, borderLeft: '4px solid #f59e0b' }}>
-          <div style={{ ...s.iconBox, background: '#fef3c7' }}><Clock size={22} color="#f59e0b" /></div>
-          <div><p style={{ ...s.statNum, color: '#92400e' }}>{pendientes}</p><p style={s.statLabel}>Pendientes</p></div>
+          <p style={{ ...s.statNum, color: '#92400e' }}>{pendientes}</p>
+          <p style={s.statLabel}>Pendientes</p>
         </div>
         <div style={{ ...s.stat, borderLeft: '4px solid #22c55e' }}>
-          <div style={{ ...s.iconBox, background: '#dcfce7' }}><CheckCircle size={22} color="#22c55e" /></div>
-          <div><p style={{ ...s.statNum, color: '#15803d' }}>{aprobadas}</p><p style={s.statLabel}>Aprobadas</p></div>
+          <p style={{ ...s.statNum, color: '#15803d' }}>{aprobadas}</p>
+          <p style={s.statLabel}>Aprobadas</p>
         </div>
         <div style={{ ...s.stat, borderLeft: '4px solid #ef4444' }}>
-          <div style={{ ...s.iconBox, background: '#fee2e2' }}><XCircle size={22} color="#ef4444" /></div>
-          <div><p style={{ ...s.statNum, color: '#b91c1c' }}>{rechazadas}</p><p style={s.statLabel}>Rechazadas</p></div>
+          <p style={{ ...s.statNum, color: '#b91c1c' }}>{rechazadas}</p>
+          <p style={s.statLabel}>Rechazadas</p>
         </div>
         {saldo && (
           <div style={{ ...s.stat, borderLeft: '4px solid #0d9488' }}>
-            <div style={{ ...s.iconBox, background: '#ccfbf1' }}><Umbrella size={22} color="#0d9488" /></div>
-            <div>
-              <p style={{ ...s.statNum, color: '#0f766e' }}>{saldo.saldo}</p>
-              <p style={s.statLabel}>Días de vacaciones</p>
-            </div>
+            <p style={{ ...s.statNum, color: '#0f766e' }}>{saldo.saldo}</p>
+            <p style={s.statLabel}>Días de vacaciones</p>
           </div>
         )}
       </div>
@@ -351,10 +348,9 @@ const s = {
   sub:        { color: '#64748b' },
   btnAdd:     { display: 'flex', alignItems: 'center', gap: '.5rem', background: '#1e3a5f', color: '#fff', border: 'none', borderRadius: '8px', padding: '.75rem 1.25rem', fontWeight: 600, fontSize: '.9rem', cursor: 'pointer' },
   resumen:    { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', marginBottom: '1.25rem' },
-  stat:       { background: '#fff', borderRadius: '12px', padding: '1.1rem 1.25rem', display: 'flex', alignItems: 'center', gap: '1rem', boxShadow: '0 1px 4px rgba(0,0,0,.08)' },
-  iconBox:    { width: '44px', height: '44px', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  stat:       { background: '#fff', borderRadius: '12px', padding: '1.1rem 1.25rem', boxShadow: '0 1px 4px rgba(0,0,0,.08)' },
   statNum:    { fontSize: '1.8rem', fontWeight: 700, margin: 0, lineHeight: 1 },
-  statLabel:  { fontSize: '.82rem', color: '#64748b', margin: '4px 0 0' },
+  statLabel:  { fontSize: '.85rem', color: '#334155', fontWeight: 700, margin: '6px 0 0' },
   tabla:      { background: '#fff', borderRadius: '12px', overflow: 'auto', boxShadow: '0 1px 3px rgba(0,0,0,.1)' },
   tbl:        { width: '100%', borderCollapse: 'collapse', minWidth: '900px' },
   th:         { textAlign: 'left', padding: '.75rem 1rem', fontSize: '.8rem', color: '#64748b', background: '#f8fafc', borderBottom: '2px solid #e2e8f0', fontWeight: 600, whiteSpace: 'nowrap' },

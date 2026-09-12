@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '../../services/api';
-import { Umbrella, Scale, CalendarCheck, AlertCircle } from 'lucide-react';
+import { AlertCircle } from 'lucide-react';
 
 /**
  * Vista del empleado sobre sus propias vacaciones: saldo del año, historial
@@ -50,17 +50,14 @@ export default function MisVacaciones() {
       {/* Tarjetas de saldo */}
       <div style={s.tarjetas}>
         <div style={{ ...s.tarjeta, borderTop: '3px solid #0d9488' }}>
-          <Umbrella size={20} color="#0d9488" />
           <span style={s.tarjetaNum}>{saldo.dias_asignados}</span>
           <span style={s.tarjetaTxt}>Días asignados</span>
         </div>
         <div style={{ ...s.tarjeta, borderTop: '3px solid #f59e0b' }}>
-          <CalendarCheck size={20} color="#f59e0b" />
-          <span style={s.tarjetaNum}>{saldo.dias_tomados}</span>
+          <span style={{ ...s.tarjetaNum, color: '#b45309' }}>{saldo.dias_tomados}</span>
           <span style={s.tarjetaTxt}>Días gozados</span>
         </div>
         <div style={{ ...s.tarjeta, borderTop: '3px solid #1e3a5f' }}>
-          <Scale size={20} color="#1e3a5f" />
           <span style={{ ...s.tarjetaNum, color: saldo.saldo > 0 ? '#1e3a5f' : '#ef4444' }}>
             {saldo.saldo}
           </span>
@@ -161,7 +158,7 @@ const s = {
   tarjeta:    { background:'#fff', borderRadius:'12px', padding:'1.25rem', display:'flex',
                 flexDirection:'column', gap:'.35rem', boxShadow:'0 1px 3px rgba(0,0,0,.1)' },
   tarjetaNum: { fontSize:'2rem', fontWeight:700, color:'#1e3a5f', lineHeight:1 },
-  tarjetaTxt: { fontSize:'.8rem', color:'#64748b' },
+  tarjetaTxt: { fontSize:'.85rem', color:'#334155', fontWeight:700 },
   legal:      { display:'flex', gap:'.6rem', border:'1.5px solid', borderRadius:'10px',
                 padding:'.85rem 1rem', marginTop:'1rem' },
   legalTxt:   { fontSize:'.85rem', color:'#334155', lineHeight:1.5 },

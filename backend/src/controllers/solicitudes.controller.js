@@ -179,6 +179,21 @@ const crearSolicitud = async (req, res) => {
       return res.status(400).json({ error: 'El motivo debe tener al menos 10 caracteres.' });
     }
 
+    // El desplegable solo ofrece los tipos activos, pero eso es del lado del
+    // cliente: sin esta comprobación se podría crear una solicitud de un tipo
+    // desactivado llamando a la API directamente.
+    const tipo = await cli.query(
+      'SELECT id, nombre, activo FROM tipos_solicitud WHERE id = $1', [id_tipo]);
+    if (tipo.rows.length === 0) {
+      return res.status(400).json({ error: 'El tipo de solicitud no existe.' });
+    }
+    if (!tipo.rows[0].activo) {
+      return res.status(400).json({
+        error: `El tipo de solicitud "${tipo.rows[0].nombre}" está desactivado y ya no puede solicitarse.`,
+      });
+    }
+    const tipoNombre = tipo.rows[0].nombre;
+
     await cli.query('BEGIN');
 
     const fin = fecha_fin || fecha_inicio;
@@ -232,8 +247,6 @@ const crearSolicitud = async (req, res) => {
       [id_empleado, id_tipo, fecha_inicio, fecha_fin || null, habiles, habiles, motivo]);
     const solicitud = result.rows[0];
 
-    const tipoRow = await cli.query('SELECT nombre FROM tipos_solicitud WHERE id = $1', [id_tipo]);
-    const tipoNombre = tipoRow.rows[0] ? tipoRow.rows[0].nombre : 'Solicitud';
     const empRow = await cli.query(
       `SELECT nombres || ' ' || apellidos AS nombre FROM empleados WHERE id = $1`, [id_empleado]);
     const empleado = empRow.rows[0] ? empRow.rows[0].nombre : 'Un empleado';
