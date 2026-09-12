@@ -52,3 +52,6 @@ desktop.ini
 # Archivos temporales generados por herramientas
 
 schema_raw.json
+
+# Archivos subidos por los usuarios (documentos y fotos)
+backend/uploads/

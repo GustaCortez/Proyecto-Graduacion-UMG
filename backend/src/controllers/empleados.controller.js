@@ -1,4 +1,6 @@
 const pool = require('../config/db');
+const { asegurarRegistroAnual, explicacion } = require('../utils/vacaciones');
+const auditoria = require('../services/auditoria');
 
 // Obtener todos los empleados activos
 const getEmpleados = async (req, res) => {
@@ -8,6 +10,7 @@ const getEmpleados = async (req, res) => {
               e.nombres || ' ' || e.apellidos AS nombre_completo,
               e.correo, e.telefono, e.fecha_ingreso,
               e.tipo_contrato, e.salario_base, e.estado,
+              (e.foto_url IS NOT NULL) AS tiene_foto,
               d.nombre AS departamento,
               p.nombre AS puesto
        FROM empleados e
@@ -91,8 +94,11 @@ const crearEmpleado = async (req, res) => {
     return res.status(400).json({ error: 'El formato del correo no es válido.' });
   }
 
+  const cli = await pool.connect();
   try {
-    const result = await pool.query(
+    await cli.query('BEGIN');
+
+    const result = await cli.query(
       `INSERT INTO empleados
         (codigo_empleado, nombres, apellidos, dpi, fecha_nacimiento,
          genero, telefono, correo, direccion, fecha_ingreso,
@@ -103,25 +109,45 @@ const crearEmpleado = async (req, res) => {
        genero, telefono, correo, direccion, fecha_ingreso,
        tipo_contrato, salario_base, id_departamento, id_puesto]
     );
+    const empleado = result.rows[0];
 
+    // Registro de vacaciones del año en curso, con los días que marca la
+    // Ley de Servicio Municipal según la antigüedad que tendrá el empleado.
     const anio = new Date().getFullYear();
-    await pool.query(
-      `INSERT INTO vacaciones (id_empleado, anio, dias_asignados, dias_tomados)
-       VALUES ($1, $2, 15, 0)
-       ON CONFLICT DO NOTHING`,
-      [result.rows[0].id, anio]
-    );
+    const vacaciones = await asegurarRegistroAnual(cli, empleado.id, anio);
+
+    await auditoria.registrar(req, {
+      accion: auditoria.ACCIONES.CREAR,
+      tabla: 'empleados',
+      registro_id: empleado.id,
+      detalle: {
+        codigo_empleado, nombres, apellidos, fecha_ingreso,
+        id_departamento, id_puesto,
+        vacaciones_generadas: { anio, dias_asignados: vacaciones.dias_asignados },
+      },
+    }, cli);
+
+    await cli.query('COMMIT');
 
     res.status(201).json({
       mensaje: 'Empleado creado exitosamente.',
-      empleado: result.rows[0]
+      empleado,
+      vacaciones: {
+        anio,
+        dias_asignados: vacaciones.dias_asignados,
+        derecho_desde: vacaciones.derecho_desde,
+        explicacion: explicacion(fecha_ingreso, anio),
+      },
     });
   } catch (err) {
+    await cli.query('ROLLBACK').catch(() => {});
     if (err.code === '23505') {
       return res.status(400).json({ error: 'El código de empleado o DPI ya existe.' });
     }
     console.error(err.message);
     res.status(500).json({ error: 'Error al crear empleado.' });
+  } finally {
+    cli.release();
   }
 };
 
@@ -158,8 +184,20 @@ const actualizarEmpleado = async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Empleado no encontrado.' });
     }
+
+    await auditoria.registrar(req, {
+      accion: auditoria.ACCIONES.ACTUALIZAR,
+      tabla: 'empleados',
+      registro_id: Number(id),
+      detalle: {
+        nombres, apellidos, telefono, correo, direccion,
+        tipo_contrato, salario_base, id_departamento, id_puesto, estado,
+      },
+    });
+
     res.json({ mensaje: 'Empleado actualizado.', empleado: result.rows[0] });
   } catch (err) {
+    console.error(err.message);
     res.status(500).json({ error: 'Error al actualizar empleado.' });
   }
 };
@@ -168,14 +206,32 @@ const actualizarEmpleado = async (req, res) => {
 const bajaEmpleado = async (req, res) => {
   const { id } = req.params;
   const { motivo_baja } = req.body;
+
+  if (!motivo_baja || motivo_baja.trim().length < 5) {
+    return res.status(400).json({ error: 'Indique el motivo de la baja (al menos 5 caracteres).' });
+  }
+
   try {
-    await pool.query(
+    const result = await pool.query(
       `UPDATE empleados SET estado='Inactivo', fecha_baja=NOW(), motivo_baja=$1
-       WHERE id=$2`,
+        WHERE id=$2
+       RETURNING id, codigo_empleado, nombres, apellidos`,
       [motivo_baja, id]
     );
-    res.json({ mensaje: 'Empleado dado de baja correctamente.' });
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Empleado no encontrado.' });
+    }
+
+    await auditoria.registrar(req, {
+      accion: auditoria.ACCIONES.BAJA_EMPLEADO,
+      tabla: 'empleados',
+      registro_id: Number(id),
+      detalle: { empleado: result.rows[0], motivo_baja },
+    });
+
+    res.json({ mensaje: 'Empleado dado de baja correctamente.', empleado: result.rows[0] });
   } catch (err) {
+    console.error(err.message);
     res.status(500).json({ error: 'Error al dar de baja al empleado.' });
   }
 };
