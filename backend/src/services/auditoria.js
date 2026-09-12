@@ -67,13 +67,20 @@ async function consultar({ limite = 50, desplazamiento = 0, accion, tabla, id_us
   const where = cond.length ? `WHERE ${cond.join(' AND ')}` : '';
   par.push(Math.min(Number(limite) || 50, 200), Number(desplazamiento) || 0);
 
+  // Se resuelve el nombre del empleado que aparece dentro del detalle para que la
+  // pantalla no tenga que mostrar un id suelto. El CASE evita que el cast falle
+  // si algún detalle guardara ahí un valor que no sea numérico.
   const { rows } = await pool.query(
     `SELECT a.id, a.accion, a.tabla, a.registro_id, a.detalle, a.ip, a.creado_en,
             u.username, u.rol,
-            COALESCE(e.nombres || ' ' || e.apellidos, u.username) AS responsable
+            COALESCE(e.nombres || ' ' || e.apellidos, u.username) AS responsable,
+            afec.nombres || ' ' || afec.apellidos AS empleado_afectado
        FROM auditoria a
        LEFT JOIN usuarios  u ON u.id = a.id_usuario
        LEFT JOIN empleados e ON e.id = u.id_empleado
+       LEFT JOIN empleados afec ON afec.id = CASE
+              WHEN a.detalle->>'id_empleado' ~ '^[0-9]+$'
+              THEN (a.detalle->>'id_empleado')::int END
        ${where}
        ORDER BY a.creado_en DESC, a.id DESC
        LIMIT $${par.length - 1} OFFSET $${par.length}`,
