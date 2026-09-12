@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import api from '../../services/api';
 import toast from 'react-hot-toast';
-import { Plus, Trash2, CalendarDays, Power, Info } from 'lucide-react';
+import { Plus, Trash2, CalendarDays, Power } from 'lucide-react';
 
 /**
  * Administración de asuetos.
@@ -98,16 +98,6 @@ export default function Asuetos() {
         </div>
       </div>
 
-      <div style={s.info}>
-        <Info size={16} color="#0d9488" style={{ flexShrink: 0, marginTop: 2 }} />
-        <p style={s.infoTxt}>
-          Las vacaciones se cuentan en días hábiles, así que estos días y los fines de semana no
-          consumen saldo. Los asuetos de Semana Santa se calculan automáticamente para cada año.
-          El 24 y 31 de diciembre no vienen cargados porque la ley los declara asueto solo a partir
-          del mediodía; si la Municipalidad cierra completo, agréguelos aquí.
-        </p>
-      </div>
-
       <div style={s.filtros}>
         <label style={s.label}>Año</label>
         <select style={s.select} value={anio} onChange={(e) => setAnio(Number(e.target.value))}>
@@ -197,9 +187,6 @@ const s = {
                 marginBottom:'1.25rem', gap:'1rem', flexWrap:'wrap' },
   titulo:     { fontSize:'1.5rem', fontWeight:700, color:'#1e3a5f' },
   sub:        { color:'#64748b' },
-  info:       { display:'flex', gap:'.6rem', background:'#f0fdfa', border:'1.5px solid #99f6e4',
-                borderRadius:'10px', padding:'.85rem 1rem', marginBottom:'1rem' },
-  infoTxt:    { fontSize:'.82rem', color:'#334155', lineHeight:1.5 },
   filtros:    { display:'flex', alignItems:'center', gap:'.75rem', marginBottom:'1rem' },
   contador:   { fontSize:'.82rem', color:'#64748b', marginLeft:'auto' },
   cargando:   { color:'#64748b' },
