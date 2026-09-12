@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import api from '../../services/api';
-import { ShieldCheck, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Eye } from 'lucide-react';
 
 /**
  * Rastro de auditoría: qué hizo cada usuario, cuándo, sobre qué registro y
@@ -57,7 +57,7 @@ export default function Auditoria() {
     <div>
       <div style={s.header}>
         <div>
-          <h1 style={s.titulo}><ShieldCheck size={22} style={{ verticalAlign: '-4px' }} /> Auditoría</h1>
+          <h1 style={s.titulo}>Auditoría</h1>
           <p style={s.sub}>Registro de acciones realizadas en el sistema</p>
         </div>
         <span style={s.total}>{total} registro(s)</span>
