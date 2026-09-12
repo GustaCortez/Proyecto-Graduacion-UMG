@@ -3,9 +3,11 @@ import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 import {
   LayoutDashboard, Users, FileText, UserCog,
-  Umbrella, BarChart2, LogOut, Building2, Menu, X, ClipboardList, UserCircle, Banknote
+  Umbrella, BarChart2, LogOut, Menu, X, ClipboardList, UserCircle, Banknote,
+  ShieldCheck, CalendarDays
 } from 'lucide-react';
 import { useState } from 'react';
+import Notificaciones from './Notificaciones';
 
 const linksAdmin = [
   { to: '/dashboard',        icon: LayoutDashboard, label: 'Dashboard'        },
@@ -14,11 +16,14 @@ const linksAdmin = [
   { to: '/gestion-nomina',   icon: Banknote,         label: 'Nómina / Planilla'},
   { to: '/usuarios',         icon: UserCog,          label: 'Usuarios'         },
   { to: '/vacaciones',       icon: Umbrella,         label: 'Vacaciones'       },
+  { to: '/asuetos',          icon: CalendarDays,     label: 'Asuetos'          },
+  { to: '/auditoria',        icon: ShieldCheck,      label: 'Auditoría'        },
   { to: '/reportes',         icon: BarChart2,        label: 'Reportes'         },
 ];
 
 const linksEmpleado = [
   { to: '/mis-solicitudes',  icon: ClipboardList,   label: 'Mis Solicitudes' },
+  { to: '/mis-vacaciones',   icon: Umbrella,        label: 'Mis Vacaciones'  },
   { to: '/notas-pago',       icon: Banknote,        label: 'Notas de Pago'   },
   { to: '/mi-perfil',        icon: UserCircle,      label: 'Mi Perfil'       },
 ];
@@ -28,8 +33,9 @@ export default function Layout({ children }) {
   const navigate = useNavigate();
   const [abierto, setAbierto] = useState(true);
 
-  const handleLogout = () => {
-    logout();
+  // logout ahora también revoca el refresh token en el servidor, por eso es async.
+  const handleLogout = async () => {
+    await logout();
     toast.success('Sesión cerrada');
     navigate('/login');
   };
@@ -86,9 +92,14 @@ export default function Layout({ children }) {
       </aside>
 
       {/* Contenido */}
-      <main style={s.main}>
-        {children}
-      </main>
+      <div style={s.columna}>
+        <header style={s.barra}>
+          <Notificaciones />
+        </header>
+        <main style={s.main}>
+          {children}
+        </main>
+      </div>
     </div>
   );
 }
@@ -110,5 +121,8 @@ const s = {
   userName:   { color:'#fff', fontSize:'.85rem', fontWeight:600, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' },
   userRol:    { color:'#94b8e0', fontSize:'.75rem', textTransform:'capitalize' },
   logoutBtn:  { background:'transparent', border:'none', color:'#94b8e0', display:'flex', padding:'4px', borderRadius:'6px', cursor:'pointer' },
+  columna:    { flex:1, display:'flex', flexDirection:'column', minWidth:0 },
+  barra:      { display:'flex', justifyContent:'flex-end', alignItems:'center', gap:'.75rem',
+                background:'#1e3a5f', padding:'.5rem 1.5rem', borderBottom:'1px solid rgba(255,255,255,.1)' },
   main:       { flex:1, padding:'2rem', overflow:'auto' },
 };

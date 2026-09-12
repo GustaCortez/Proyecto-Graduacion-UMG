@@ -46,12 +46,12 @@ function domingoPascua(anio) {
 
 /** Asuetos de fecha fija en Guatemala (Codigo de Trabajo art. 127 y Ley de Servicio Civil). */
 const ASUETOS_FIJOS = [
-  ['01-01', 'Ano Nuevo'],
-  ['05-01', 'Dia del Trabajo'],
-  ['06-30', 'Dia del Ejercito'],
-  ['09-15', 'Dia de la Independencia'],
-  ['10-20', 'Dia de la Revolucion de 1944'],
-  ['11-01', 'Dia de Todos los Santos'],
+  ['01-01', 'Año Nuevo'],
+  ['05-01', 'Día del Trabajo'],
+  ['06-30', 'Día del Ejército'],
+  ['09-15', 'Día de la Independencia'],
+  ['10-20', 'Día de la Revolución de 1944'],
+  ['11-01', 'Día de Todos los Santos'],
   ['12-25', 'Navidad'],
 ];
 
@@ -62,7 +62,7 @@ function asuetosNacionales(anio) {
     ...ASUETOS_FIJOS.map(([md, nombre]) => ({ fecha: `${anio}-${md}`, nombre })),
     { fecha: isoDeUTC(sumarDias(pascua, -3)), nombre: 'Jueves Santo' },
     { fecha: isoDeUTC(sumarDias(pascua, -2)), nombre: 'Viernes Santo' },
-    { fecha: isoDeUTC(sumarDias(pascua, -1)), nombre: 'Sabado de Gloria' },
+    { fecha: isoDeUTC(sumarDias(pascua, -1)), nombre: 'Sábado de Gloria' },
   ].sort((x, y) => x.fecha.localeCompare(y.fecha));
 }
 
@@ -106,7 +106,7 @@ async function detalleDiasHabiles(inicio, fin, cliente = pool) {
     [desde, hasta]
   );
   const asuetos = new Map(rows.map((r) => [r.fecha, r.nombre]));
-  const NOMBRES = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
+  const NOMBRES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
   const detalle = [];
   const limite = aUTC(hasta);

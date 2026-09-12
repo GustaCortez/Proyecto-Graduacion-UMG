@@ -127,7 +127,7 @@ const getMiSaldo = async (req, res) => {
       'SELECT id_empleado FROM usuarios WHERE id = $1', [req.usuario.id]);
     const idEmpleado = u.rows[0] ? u.rows[0].id_empleado : null;
     if (!idEmpleado) {
-      return res.status(400).json({ error: 'Su usuario no esta ligado a un expediente de empleado.' });
+      return res.status(400).json({ error: 'Su usuario no está ligado a un expediente de empleado.' });
     }
 
     const anio = new Date().getFullYear();
@@ -167,11 +167,11 @@ const actualizarSaldo = async (req, res) => {
   const { dias_disponibles, dias_usados } = req.body;
 
   if (dias_disponibles === undefined && dias_usados === undefined) {
-    return res.status(400).json({ error: 'Proporcione dias_disponibles o dias_usados.' });
+    return res.status(400).json({ error: 'Proporcione los días disponibles o los días usados.' });
   }
   for (const [campo, valor] of [['dias_disponibles', dias_disponibles], ['dias_usados', dias_usados]]) {
     if (valor !== undefined && (isNaN(Number(valor)) || Number(valor) < 0)) {
-      return res.status(400).json({ error: `El campo ${campo} debe ser un numero mayor o igual a 0.` });
+      return res.status(400).json({ error: `El campo ${campo} debe ser un número mayor o igual a 0.` });
     }
   }
 
@@ -187,7 +187,7 @@ const actualizarSaldo = async (req, res) => {
     const nuevosTomados = dias_usados !== undefined ? Number(dias_usados) : antes.dias_tomados;
     if (nuevosTomados > nuevosAsignados) {
       return res.status(400).json({
-        error: `Los dias usados (${nuevosTomados}) no pueden superar los asignados (${nuevosAsignados}).`,
+        error: `Los días usados (${nuevosTomados}) no pueden superar los asignados (${nuevosAsignados}).`,
       });
     }
 
@@ -273,7 +273,7 @@ const generarAnio = async (req, res) => {
 const simular = async (req, res) => {
   const { fecha_ingreso, anio } = req.query;
   if (!fecha_ingreso || isNaN(Date.parse(fecha_ingreso))) {
-    return res.status(400).json({ error: 'Indique una fecha_ingreso valida (YYYY-MM-DD).' });
+    return res.status(400).json({ error: 'Indique una fecha de ingreso válida (YYYY-MM-DD).' });
   }
   const a = Number(anio) || new Date().getFullYear();
   res.json({

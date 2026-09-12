@@ -29,7 +29,7 @@ const crear = async (req, res) => {
   const { fecha, nombre, tipo } = req.body;
 
   if (!fecha || isNaN(Date.parse(fecha))) {
-    return res.status(400).json({ error: 'Indique una fecha valida (YYYY-MM-DD).' });
+    return res.status(400).json({ error: 'Indique una fecha válida (YYYY-MM-DD).' });
   }
   if (!nombre || nombre.trim().length < 3) {
     return res.status(400).json({ error: 'El nombre debe tener al menos 3 caracteres.' });

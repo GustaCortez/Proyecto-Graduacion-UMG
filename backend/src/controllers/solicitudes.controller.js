@@ -11,7 +11,7 @@ const VERBO_ESTADO = {
   'Aprobada': 'aprobada',
   'Rechazada': 'rechazada',
   'Cancelada': 'cancelada',
-  'En revision': 'puesta en revision',
+  'En revision': 'puesta en revisión',
 };
 
 /** id del tipo "Vacaciones". Se resuelve por nombre y se cachea. */
@@ -119,14 +119,14 @@ const getTipos = async (req, res) => {
 const previsualizarDias = async (req, res) => {
   const { fecha_inicio, fecha_fin } = req.query;
   if (!fecha_inicio || isNaN(Date.parse(fecha_inicio))) {
-    return res.status(400).json({ error: 'Indique una fecha_inicio valida (YYYY-MM-DD).' });
+    return res.status(400).json({ error: 'Indique una fecha de inicio válida (YYYY-MM-DD).' });
   }
   if (fecha_fin && isNaN(Date.parse(fecha_fin))) {
-    return res.status(400).json({ error: 'El formato de fecha_fin no es valido (YYYY-MM-DD).' });
+    return res.status(400).json({ error: 'El formato de la fecha de fin no es válido (YYYY-MM-DD).' });
   }
   const fin = fecha_fin || fecha_inicio;
   if (aISO(fin) < aISO(fecha_inicio)) {
-    return res.status(400).json({ error: 'La fecha_fin no puede ser anterior a fecha_inicio.' });
+    return res.status(400).json({ error: 'La fecha de fin no puede ser anterior a la de inicio.' });
   }
   try {
     const habiles = await contarDiasHabiles(fecha_inicio, fin);
@@ -141,7 +141,7 @@ const previsualizarDias = async (req, res) => {
     });
   } catch (err) {
     console.error(err.message);
-    res.status(500).json({ error: 'Error al calcular los dias habiles.' });
+    res.status(500).json({ error: 'Error al calcular los días hábiles.' });
   }
 };
 
@@ -156,24 +156,24 @@ const crearSolicitud = async (req, res) => {
     if (req.usuario.rol === 'empleado') {
       id_empleado = await empleadoDelUsuario(req.usuario.id, cli);
       if (!id_empleado) {
-        return res.status(400).json({ error: 'No se encontro el empleado asociado a este usuario.' });
+        return res.status(400).json({ error: 'No se encontró el empleado asociado a este usuario.' });
       }
     }
 
     if (!id_empleado || !id_tipo || !fecha_inicio || !motivo) {
-      return res.status(400).json({ error: 'Los campos id_tipo, fecha_inicio y motivo son requeridos.' });
+      return res.status(400).json({ error: 'Los campos tipo, fecha de inicio y motivo son requeridos.' });
     }
     if (req.usuario.rol === 'empleado' && TIPOS_SOLO_RRHH.includes(Number(id_tipo))) {
-      return res.status(403).json({ error: 'Ese tipo de solicitud solo lo registra personal de RRHH.' });
+      return res.status(403).json({ error: 'Ese tipo de solicitud solo lo registra el personal de RRHH.' });
     }
     if (isNaN(Date.parse(fecha_inicio))) {
-      return res.status(400).json({ error: 'El formato de fecha_inicio no es valido (YYYY-MM-DD).' });
+      return res.status(400).json({ error: 'El formato de la fecha de inicio no es válido (YYYY-MM-DD).' });
     }
     if (fecha_fin && isNaN(Date.parse(fecha_fin))) {
-      return res.status(400).json({ error: 'El formato de fecha_fin no es valido (YYYY-MM-DD).' });
+      return res.status(400).json({ error: 'El formato de la fecha de fin no es válido (YYYY-MM-DD).' });
     }
     if (fecha_fin && aISO(fecha_fin) < aISO(fecha_inicio)) {
-      return res.status(400).json({ error: 'La fecha_fin no puede ser anterior a fecha_inicio.' });
+      return res.status(400).json({ error: 'La fecha de fin no puede ser anterior a la de inicio.' });
     }
     if (motivo.trim().length < 10) {
       return res.status(400).json({ error: 'El motivo debe tener al menos 10 caracteres.' });
@@ -191,7 +191,7 @@ const crearSolicitud = async (req, res) => {
       if (habiles === 0) {
         await cli.query('ROLLBACK');
         return res.status(400).json({
-          error: 'El rango seleccionado no contiene ningun dia habil (solo fines de semana o asuetos).',
+          error: 'El rango seleccionado no contiene ningún día hábil (solo fines de semana o asuetos).',
         });
       }
 
@@ -202,7 +202,7 @@ const crearSolicitud = async (req, res) => {
       if (vac.dias_asignados === 0) {
         await cli.query('ROLLBACK');
         return res.status(400).json({
-          error: 'Aun no ha cumplido un ano de servicio continuo, por lo que todavia no tiene derecho '
+          error: 'Aún no ha cumplido un año de servicio continuo, por lo que todavía no tiene derecho '
                + 'a vacaciones. ' + ARTICULO,
           dias_asignados: 0, saldo: 0,
         });
@@ -218,7 +218,7 @@ const crearSolicitud = async (req, res) => {
       if (habiles > saldo) {
         await cli.query('ROLLBACK');
         return res.status(400).json({
-          error: `Solicita ${habiles} dias habiles pero su saldo disponible es de ${saldo}.`,
+          error: `Solicita ${habiles} días hábiles pero su saldo disponible es de ${saldo}.`,
           dias_habiles: habiles, saldo,
           dias_asignados: vac.dias_asignados, dias_tomados: vac.dias_tomados,
         });
@@ -246,8 +246,8 @@ const crearSolicitud = async (req, res) => {
       pendientes.push(await notif.notificar({
         id_usuario: idU,
         titulo: `Nueva solicitud: ${tipoNombre}`,
-        mensaje: `${empleado} solicito ${tipoNombre.toLowerCase()} del ${aISO(fecha_inicio)} al `
-               + `${aISO(fin)} (${habiles} dias habiles).`,
+        mensaje: `${empleado} solicitó ${tipoNombre.toLowerCase()} del ${aISO(fecha_inicio)} al `
+               + `${aISO(fin)} (${habiles} días hábiles).`,
         id_solicitud: solicitud.id,
       }, cli));
     }
@@ -286,7 +286,7 @@ const actualizarEstado = async (req, res) => {
   const { estado, comentario_rrhh } = req.body;
 
   if (!ESTADOS_VALIDOS.includes(estado)) {
-    return res.status(400).json({ error: 'Estado no valido.' });
+    return res.status(400).json({ error: 'Estado no válido.' });
   }
 
   const cli = await pool.connect();
@@ -334,7 +334,7 @@ const actualizarEstado = async (req, res) => {
         if (habiles > saldo) {
           await cli.query('ROLLBACK');
           return res.status(400).json({
-            error: `No se puede aprobar: requiere ${habiles} dias habiles y el empleado tiene `
+            error: `No se puede aprobar: requiere ${habiles} días hábiles y el empleado tiene `
                  + `${saldo} disponibles.`,
             dias_habiles: habiles, saldo,
           });
@@ -345,7 +345,7 @@ const actualizarEstado = async (req, res) => {
           [habiles, vac.id]);
         descontados = habiles;
         idVacaciones = vac.id;
-        notaSaldo = `Se descontaron ${habiles} dias habiles. Saldo restante: ${saldo - habiles}.`;
+        notaSaldo = `Se descontaron ${habiles} días hábiles. Saldo restante: ${saldo - habiles}.`;
       }
 
       // Revertir: si deja de estar aprobada, se devuelven los dias al saldo.
@@ -353,7 +353,7 @@ const actualizarEstado = async (req, res) => {
         await cli.query(
           'UPDATE vacaciones SET dias_tomados = GREATEST(dias_tomados - $1, 0) WHERE id = $2',
           [sol.dias_descontados, sol.id_vacaciones]);
-        notaSaldo = `Se devolvieron ${sol.dias_descontados} dias habiles al saldo.`;
+        notaSaldo = `Se devolvieron ${sol.dias_descontados} días hábiles al saldo.`;
         descontados = 0;
       }
     }

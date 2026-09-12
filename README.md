@@ -17,7 +17,9 @@ Sistema web para la gestión del personal de la Municipalidad de Jalapa. Permite
 | Frontend   | React 19, React Router, Axios     |
 | Backend    | Node.js, Express 5, JWT           |
 | Base de datos | PostgreSQL 18                  |
-| Seguridad  | bcrypt, Helmet, CORS              |
+| Seguridad  | bcrypt, JWT + refresh token rotativo, Helmet, CORS |
+| Archivos   | Multer (documentos y fotos)       |
+| Tiempo real| Server-Sent Events (SSE)          |
 
 
 ## Instalación y configuración
@@ -37,16 +39,12 @@ Desde pgAdmin o psql, crear la base de datos:
 CREATE DATABASE municipalidad_rrhh;
 ```
 
-Aplicar el schema (estructura de tablas, vistas y triggers):
+Aplicar las migraciones (ver la sección **Migraciones** más abajo):
 
 ```bash
-psql -U postgres -d municipalidad_rrhh -f database/schema.sql
-```
-
-Cargar los datos de prueba:
-
-```bash
-psql -U postgres -d municipalidad_rrhh -f database/seed.sql
+cd backend
+npm install
+node scripts/migrar.js
 ```
 
 ### 3. Configurar el backend
@@ -98,10 +96,10 @@ La aplicación quedará disponible en: `http://localhost:3000`
 |------------|----------------|----------|
 | admin      | Admin2026!     | Admin    |
 | rrhh       | Admin2026!     | RRHH     |
-| jgonzalez  | Empleado2026!  | Empleado |
-| aherrera   | Empleado2026!  | Empleado |
 
-> Estas credenciales corresponden al archivo `database/seed.sql`. Cambiarlas en producción.
+> Cambiarlas en producción. Para probar el rol `empleado`, cree un usuario desde
+> **Usuarios** y lígelo a un empleado que ya tenga un año de servicio continuo;
+> de lo contrario no podrá solicitar vacaciones (ver la base legal más abajo).
 
 ---
 
@@ -113,20 +111,29 @@ municipalidad-rrhh/
 │   ├── src/
 │   │   ├── config/        # Conexión a PostgreSQL
 │   │   ├── controllers/   # Lógica de negocio
-│   │   ├── middleware/     # JWT y control de roles
-│   │   └── routes/        # Definición de endpoints
+│   │   ├── middleware/    # JWT, control de roles y carga de archivos
+│   │   ├── routes/        # Definición de endpoints
+│   │   ├── services/      # Auditoría, notificaciones y bus SSE
+│   │   └── utils/         # Días hábiles y regla de vacaciones
+│   ├── scripts/
+│   │   └── migrar.js      # Ejecutor de migraciones (admite --seco)
+│   ├── uploads/           # Documentos y fotos (fuera de git)
 │   ├── .env.example       # Plantilla de variables de entorno
 │   └── server.js          # Punto de entrada
 ├── frontend/
 │   └── src/
-│       ├── components/    # Layout y componentes reutilizables
+│       ├── components/    # Layout y campanita de notificaciones
 │       ├── context/       # AuthContext (estado global)
-│       ├── pages/         # Dashboard, Empleados, Solicitudes, Login
-│       └── services/      # Cliente HTTP (axios)
+│       ├── pages/         # Dashboard, Empleados, Solicitudes, Vacaciones,
+│       │                  # Asuetos, Auditoría, Perfil, Login
+│       └── services/      # Cliente HTTP con renovación automática de sesión
 └── database/
-    ├── schema.sql          # Estructura completa de la BD
-    └── seed.sql            # Datos de prueba
+    └── migrations/
+        └── 001_vacaciones_notificaciones_auditoria.sql
 ```
+
+> Pendiente: versionar `database/schema.sql` (estructura base) y `database/seed.sql`
+> (datos de prueba). Hoy la estructura base solo existe en la base de datos.
 
 ## Endpoints principales
 
@@ -142,6 +149,88 @@ municipalidad-rrhh/
 | POST   | /api/solicitudes            | Crear solicitud              | Autenticado   |
 | PATCH  | /api/solicitudes/:id/estado | Aprobar o rechazar solicitud | RRHH / Admin  |
 | GET    | /api/dashboard              | Estadísticas generales       | Autenticado   |
+
+### Vacaciones
+
+| Método | Ruta                                  | Descripción                                | Rol requerido |
+|--------|---------------------------------------|--------------------------------------------|---------------|
+| GET    | /api/vacaciones                       | Saldo de todos los empleados activos       | RRHH / Admin  |
+| GET    | /api/vacaciones/mi-saldo              | Saldo del empleado autenticado             | Autenticado   |
+| GET    | /api/vacaciones/:id_empleado          | Saldos por año de un empleado              | Propio o RRHH |
+| GET    | /api/vacaciones/:id_empleado/historial| Períodos gozados con fechas de inicio y fin| Propio o RRHH |
+| POST   | /api/vacaciones/generar               | Genera los registros del año               | RRHH / Admin  |
+| PATCH  | /api/vacaciones/:id/saldo             | Ajuste manual del saldo (queda auditado)   | RRHH / Admin  |
+
+### Solicitudes, documentos y asuetos
+
+| Método | Ruta                                    | Descripción                                  | Rol requerido |
+|--------|-----------------------------------------|----------------------------------------------|---------------|
+| GET    | /api/solicitudes/dias-habiles           | Previsualiza los días hábiles de un rango    | Autenticado   |
+| GET    | /api/solicitudes/:id/documentos         | Lista los adjuntos de una solicitud          | Propio o RRHH |
+| POST   | /api/solicitudes/:id/documentos         | Adjunta un documento (PDF o imagen, 10 MB)   | Propio o RRHH |
+| DELETE | /api/solicitudes/:id/documentos/:idDoc  | Elimina un adjunto                           | Propio o RRHH |
+| GET    | /api/feriados                           | Asuetos de un año                            | Autenticado   |
+| POST   | /api/feriados                           | Registra un asueto (ej. la feria titular)    | RRHH / Admin  |
+| POST   | /api/feriados/nacionales                | Carga los asuetos nacionales de un año       | RRHH / Admin  |
+
+### Notificaciones, auditoría y sesión
+
+| Método | Ruta                            | Descripción                                      | Rol requerido |
+|--------|---------------------------------|--------------------------------------------------|---------------|
+| GET    | /api/notificaciones             | Notificaciones del usuario                       | Autenticado   |
+| GET    | /api/notificaciones/ticket      | Ticket de un solo uso para abrir el canal SSE    | Autenticado   |
+| GET    | /api/notificaciones/stream      | Canal SSE en vivo (se autentica con el ticket)   | Ticket válido |
+| PATCH  | /api/notificaciones/leer-todas  | Marca todas como leídas                          | Autenticado   |
+| GET    | /api/auditoria                  | Rastro de acciones, con filtros y paginación     | RRHH / Admin  |
+| POST   | /api/auth/refresh               | Renueva el token de acceso (rota el refresh)     | Público       |
+| POST   | /api/auth/logout                | Revoca el refresh token                          | Autenticado   |
+| POST   | /api/auth/foto                  | Sube la foto de perfil (JPG/PNG/WebP, 3 MB)      | Autenticado   |
+| GET    | /api/empleados/:id/foto         | Entrega la foto (ruta autenticada)               | Propio o RRHH |
+
+---
+
+## Vacaciones: base legal
+
+La Municipalidad **no se rige por el Código de Trabajo** sino por la
+**Ley de Servicio Municipal (Decreto 1-87), artículo 44 inciso b)**:
+
+> *"A gozar de un período de vacaciones remuneradas por cada año de servicios
+> continuos en la forma siguiente: a 20 días hábiles, después de un año de
+> servicios continuos; a 25 días hábiles, después de 5 años de servicio
+> continuos. […] Las vacaciones no son acumulables de año en año […]"*
+
+De ahí salen las reglas que aplica el sistema:
+
+| Antigüedad al aniversario | Días hábiles |
+|---------------------------|--------------|
+| Menos de 1 año            | 0 (aún no adquiere el derecho) |
+| De 1 a 4 años             | 20 |
+| 5 años o más              | 25 |
+
+- Se cuentan **días hábiles**: no consumen saldo los fines de semana ni los
+  asuetos registrados en `dias_feriados`. Los de Semana Santa se calculan con el
+  algoritmo de Pascua para cualquier año.
+- El saldo **no se arrastra** de un año al siguiente.
+- El descuento ocurre **al aprobar** la solicitud, dentro de una transacción. Si
+  después se cancela o rechaza, los días se devuelven automáticamente.
+- El 24 y 31 de diciembre no vienen precargados: la ley los declara asueto solo
+  a partir del mediodía. Si la Municipalidad cierra completo, agréguelos desde
+  la pantalla **Asuetos**.
+
+---
+
+## Migraciones
+
+```bash
+cd backend
+node scripts/migrar.js --seco   # simula y muestra los cambios, sin escribir
+node scripts/migrar.js          # aplica
+```
+
+La migración `database/migrations/001` crea las tablas de asuetos y refresh
+tokens, agrega las columnas de trazabilidad del descuento de vacaciones y la
+foto de perfil, carga los asuetos nacionales y recalcula los saldos conforme al
+artículo 44 b).
 
 ---
 

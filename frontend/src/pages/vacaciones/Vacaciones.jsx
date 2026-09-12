@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '../../services/api';
-import { Pencil } from 'lucide-react';
+import { Pencil, History, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export default function Vacaciones() {
@@ -9,6 +9,31 @@ export default function Vacaciones() {
   const [modal, setModal]           = useState(false);
   const [seleccionado, setSeleccionado] = useState(null);
   const [form, setForm]             = useState({ dias_disponibles:'', dias_usados:'' });
+  const [historial, setHistorial]   = useState(null);
+
+  const verHistorial = async (v) => {
+    try {
+      const { data } = await api.get(`/vacaciones/${v.id_empleado}/historial`);
+      setHistorial(data);
+    } catch {
+      toast.error('No se pudo cargar el historial');
+    }
+  };
+
+  /** Regenera los registros del año aplicando el art. 44 b) a cada empleado activo. */
+  const generarAnio = async () => {
+    if (!window.confirm(
+      'Se generarán los registros de vacaciones del año en curso para todos los empleados activos, '
+      + 'con los días que marca la Ley de Servicio Municipal según su antigüedad. '
+      + 'Los días ya gozados no se modifican. ¿Continuar?')) return;
+    try {
+      const { data } = await api.post('/vacaciones/generar', {});
+      toast.success(`${data.mensaje} ${data.nuevos} nuevo(s) de ${data.total}.`);
+      cargar();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Error al generar');
+    }
+  };
 
   const cargar = () => api.get('/vacaciones').then(r => setVacaciones(r.data)).catch(() => setVacaciones([]));
 
@@ -51,9 +76,19 @@ export default function Vacaciones() {
       <div style={s.header}>
         <div>
           <h1 style={s.titulo}>Vacaciones</h1>
-          <p style={s.sub}>Saldo de días por empleado — {new Date().getFullYear()}</p>
+          <p style={s.sub}>
+            Saldo de días hábiles por empleado — {new Date().getFullYear()}
+          </p>
         </div>
+        <button style={s.btnGenerar} onClick={generarAnio}>
+          <RefreshCw size={16}/> Generar año
+        </button>
       </div>
+
+      <p style={s.legal}>
+        20 días hábiles después de 1 año de servicio y 25 después de 5 años, no acumulables.
+        Ley de Servicio Municipal (Decreto 1-87), art. 44 inciso b).
+      </p>
 
       <div style={s.searchBox}>
         <input style={s.searchInput} placeholder="Buscar empleado..."
@@ -83,9 +118,12 @@ export default function Vacaciones() {
                     {v.saldo ?? '—'} días
                   </span>
                 </td>
-                <td style={s.td}>
-                  <button style={s.btnEdit} onClick={() => abrirEditar(v)} title="Editar saldo">
+                <td style={{ ...s.td, display:'flex', gap:'.4rem' }}>
+                  <button style={s.btnEdit} onClick={() => abrirEditar(v)} title="Ajustar saldo manualmente">
                     <Pencil size={15}/>
+                  </button>
+                  <button style={s.btnHist} onClick={() => verHistorial(v)} title="Ver historial de vacaciones">
+                    <History size={15}/>
                   </button>
                 </td>
               </tr>
@@ -128,6 +166,56 @@ export default function Vacaciones() {
           </div>
         </div>
       )}
+
+      {historial && (
+        <div style={s.overlay} onClick={() => setHistorial(null)}>
+          <div style={{ ...s.modal, maxWidth:'720px' }} onClick={e => e.stopPropagation()}>
+            <h2 style={s.modalTitle}>Historial de vacaciones</h2>
+            <p style={s.histMeta}>
+              {historial.empleado.empleado} · {historial.empleado.codigo_empleado} ·
+              ingreso {historial.empleado.fecha_ingreso}<br/>
+              {historial.total_periodos} período(s) gozado(s), {historial.total_dias_gozados} día(s) hábiles.
+            </p>
+
+            {historial.historial.length === 0 ? (
+              <p style={{ color:'#94a3b8' }}>Sin períodos registrados.</p>
+            ) : (
+              <div style={{ overflowX:'auto' }}>
+                <table style={s.tbl}>
+                  <thead>
+                    <tr>{['Año','Desde','Hasta','Hábiles','Descontados','Estado','Revisado por'].map(h => (
+                      <th key={h} style={s.th}>{h}</th>))}</tr>
+                  </thead>
+                  <tbody>
+                    {historial.historial.map(h => (
+                      <tr key={h.id_solicitud}>
+                        <td style={s.td}>{h.anio}</td>
+                        <td style={s.td}>{h.fecha_inicio}</td>
+                        <td style={s.td}>{h.fecha_fin}</td>
+                        <td style={s.td}>{h.dias_habiles ?? '—'}</td>
+                        <td style={s.td}><strong>{h.dias_descontados || 0}</strong></td>
+                        <td style={s.td}>
+                          <span style={{ ...s.badge, background:
+                            h.estado === 'Aprobada' ? '#22c55e'
+                            : h.estado === 'Rechazada' ? '#ef4444'
+                            : h.estado === 'Cancelada' ? '#94a3b8' : '#f59e0b' }}>
+                            {h.estado}
+                          </span>
+                        </td>
+                        <td style={{ ...s.td, color:'#64748b' }}>{h.revisado_por || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div style={{ display:'flex', justifyContent:'flex-end', marginTop:'1.25rem' }}>
+              <button style={s.btnCancelar} onClick={() => setHistorial(null)}>Cerrar</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -153,4 +241,9 @@ const s = {
   input:      { padding:'.65rem .875rem', border:'1.5px solid #e2e8f0', borderRadius:'8px', fontSize:'.9rem', outline:'none', width:'100%', boxSizing:'border-box' },
   btnCancelar:{ padding:'.7rem 1.5rem', border:'1.5px solid #e2e8f0', borderRadius:'8px', background:'#fff', color:'#64748b', fontWeight:600, cursor:'pointer' },
   btnGuardar: { padding:'.7rem 1.5rem', border:'none', borderRadius:'8px', background:'#1e3a5f', color:'#fff', fontWeight:600, cursor:'pointer' },
+  btnHist:    { background:'#f1f5f9', border:'none', borderRadius:'6px', padding:'5px', display:'flex', color:'#475569', cursor:'pointer' },
+  btnGenerar: { display:'flex', alignItems:'center', gap:'.4rem', padding:'.6rem 1rem', border:'1.5px solid #e2e8f0',
+                borderRadius:'8px', background:'#fff', color:'#334155', fontWeight:600, cursor:'pointer' },
+  legal:      { fontSize:'.78rem', color:'#94a3b8', marginBottom:'1rem', fontStyle:'italic' },
+  histMeta:   { fontSize:'.85rem', color:'#64748b', marginBottom:'1rem' },
 };

@@ -37,7 +37,7 @@ const stream = async (req, res) => {
 
   if (!datos || datos.expira <= Date.now()) {
     if (ticket) tickets.delete(ticket);
-    return res.status(401).json({ error: 'Ticket invalido o vencido.' });
+    return res.status(401).json({ error: 'Ticket inválido o vencido.' });
   }
   tickets.delete(ticket); // un solo uso
 

@@ -65,7 +65,7 @@ function crearSubida({ carpeta, tipos, limiteMB, campo }) {
     if (!err) return next();
     if (err instanceof multer.MulterError) {
       const mensaje = err.code === 'LIMIT_FILE_SIZE'
-        ? `El archivo supera el limite de ${limiteMB} MB.`
+        ? `El archivo supera el límite de ${limiteMB} MB.`
         : `Error al subir el archivo: ${err.message}`;
       return res.status(400).json({ error: mensaje });
     }

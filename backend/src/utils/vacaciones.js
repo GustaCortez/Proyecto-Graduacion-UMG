@@ -43,9 +43,9 @@ function explicacion(fechaIngreso, anio) {
   const anios = aniosDeServicio(fechaIngreso, anio);
   const dias = diasPorAntiguedad(fechaIngreso, anio);
   if (anios < 1) {
-    return `Aun no cumple un ano de servicio continuo (ingreso ${aISO(fechaIngreso)}), por lo que todavia no adquiere el derecho. ${ARTICULO}`;
+    return `Aún no cumple un año de servicio continuo (ingreso ${aISO(fechaIngreso)}), por lo que todavía no adquiere el derecho. ${ARTICULO}`;
   }
-  return `${anios} ano(s) de servicio continuo al ${fechaDerecho(fechaIngreso, anio)} -> ${dias} dias habiles. ${ARTICULO}`;
+  return `${anios} año(s) de servicio continuo al ${fechaDerecho(fechaIngreso, anio)}: ${dias} días hábiles. ${ARTICULO}`;
 }
 
 /**

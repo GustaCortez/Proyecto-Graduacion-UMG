@@ -15,7 +15,7 @@ export default function Login() {
     setCargando(true);
     try {
       const res = await api.post('/auth/login', data);
-      login(res.data.token, res.data.usuario);
+      login(res.data.token, res.data.usuario, res.data.refreshToken);
       toast.success(`Bienvenido, ${res.data.usuario.nombre}`);
       const destino = ['admin','rrhh'].includes(res.data.usuario.rol) ? '/dashboard' : '/mis-solicitudes';
       navigate(destino);
