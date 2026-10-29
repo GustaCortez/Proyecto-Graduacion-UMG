@@ -1,19 +1,11 @@
--- =============================================================================
--- Migracion 001
--- Sistema de Gestion de RRHH - Municipalidad de Jalapa
---
--- Habilita: vacaciones conforme a la Ley de Servicio Municipal (Decreto 1-87,
--- art. 44 b), solicitud de vacaciones con descuento automatico, historial,
--- notificaciones, documentos adjuntos, auditoria, refresh tokens y foto de perfil.
--- =============================================================================
+-- Migracion 001 - RRHH Municipalidad de Jalapa
+-- Vacaciones (Ley de Servicio Municipal, Decreto 1-87 art. 44 b), solicitudes con
+-- descuento automatico, notificaciones, adjuntos, auditoria, refresh tokens y foto.
 
 BEGIN;
 
--- -----------------------------------------------------------------------------
--- 1. Asuetos / dias feriados
---    El art. 44 b) mide las vacaciones en DIAS HABILES, asi que hace falta saber
---    que dias no se cuentan. Editable por RRHH para agregar la feria titular.
--- -----------------------------------------------------------------------------
+-- 1. Asuetos: el art. 44 b) mide las vacaciones en DIAS HABILES, asi que estos
+--    dias no cuentan. Editable por RRHH para agregar la feria titular.
 CREATE TABLE IF NOT EXISTS dias_feriados (
   id         SERIAL PRIMARY KEY,
   fecha      DATE         NOT NULL UNIQUE,
@@ -26,9 +18,7 @@ CREATE TABLE IF NOT EXISTS dias_feriados (
 
 CREATE INDEX IF NOT EXISTS idx_feriados_fecha ON dias_feriados (fecha) WHERE activo;
 
--- -----------------------------------------------------------------------------
--- 2. Vacaciones: fecha en que se adquiere el derecho (el aniversario de ingreso)
--- -----------------------------------------------------------------------------
+-- 2. Vacaciones: fecha en que se adquiere el derecho (aniversario de ingreso)
 ALTER TABLE vacaciones ADD COLUMN IF NOT EXISTS derecho_desde DATE;
 
 COMMENT ON COLUMN vacaciones.derecho_desde IS
@@ -36,9 +26,7 @@ COMMENT ON COLUMN vacaciones.derecho_desde IS
 COMMENT ON COLUMN vacaciones.dias_asignados IS
   'Dias habiles segun Ley de Servicio Municipal art. 44 b): 20 tras 1 ano, 25 tras 5 anos.';
 
--- -----------------------------------------------------------------------------
--- 3. Solicitudes: trazabilidad del descuento automatico de vacaciones
--- -----------------------------------------------------------------------------
+-- 3. Solicitudes: trazabilidad del descuento de vacaciones
 ALTER TABLE solicitudes ADD COLUMN IF NOT EXISTS dias_habiles     INTEGER;
 ALTER TABLE solicitudes ADD COLUMN IF NOT EXISTS dias_descontados INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE solicitudes ADD COLUMN IF NOT EXISTS id_vacaciones    INTEGER
@@ -51,14 +39,10 @@ COMMENT ON COLUMN solicitudes.dias_descontados IS
 
 CREATE INDEX IF NOT EXISTS idx_solicitudes_empleado ON solicitudes (id_empleado, creado_en DESC);
 
--- -----------------------------------------------------------------------------
 -- 4. Empleados: foto de perfil
--- -----------------------------------------------------------------------------
 ALTER TABLE empleados ADD COLUMN IF NOT EXISTS foto_url VARCHAR(500);
 
--- -----------------------------------------------------------------------------
--- 5. Refresh tokens (renovacion automatica de sesion, con rotacion)
--- -----------------------------------------------------------------------------
+-- 5. Refresh tokens (rotativos)
 CREATE TABLE IF NOT EXISTS refresh_tokens (
   id              SERIAL PRIMARY KEY,
   id_usuario      INTEGER      NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
@@ -76,9 +60,7 @@ CREATE INDEX IF NOT EXISTS idx_refresh_usuario ON refresh_tokens (id_usuario, ex
 COMMENT ON COLUMN refresh_tokens.token_hash IS
   'SHA-256 del refresh token. El valor en claro nunca se guarda.';
 
--- -----------------------------------------------------------------------------
--- 6. Indices para notificaciones y auditoria (las tablas ya existian sin uso)
--- -----------------------------------------------------------------------------
+-- 6. Indices para notificaciones y auditoria
 CREATE INDEX IF NOT EXISTS idx_notificaciones_usuario
   ON notificaciones (id_usuario, leida, creado_en DESC);
 

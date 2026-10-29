@@ -1,12 +1,18 @@
 import { useEffect, useState, useCallback } from 'react';
 import api from '../../services/api';
+import { useLocation } from 'react-router-dom';
 import { FilePlus, Paperclip, Upload, Trash2, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { fechaCorta } from '../../utils/fechas';
 
 const colores = { 'Pendiente': '#f59e0b', 'En revision': '#3b82f6', 'Aprobada': '#22c55e', 'Rechazada': '#ef4444', 'Cancelada': '#94a3b8' };
 const ESTADOS_EDITABLES = ['Pendiente', 'En revision'];
 
 const formVacio = { id_tipo: '', fecha_inicio: '', fecha_fin: '', motivo: '' };
+
+// Mismos limites que backend/src/middleware/upload.middleware.js
+const TIPOS_ARCHIVO = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
+const MAX_ARCHIVO_MB = 10;
 
 const kb = (bytes) => (bytes > 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`);
 
@@ -19,6 +25,9 @@ export default function MisSolicitudes() {
   const [calculo, setCalculo]         = useState(null);
   const [enviando, setEnviando]       = useState(false);
   const [adjuntos, setAdjuntos]       = useState(null); // { solicitud, documentos }
+  const [archivo, setArchivo]         = useState(null);
+  // Id que llega al pulsar una notificación, para señalar de cuál se trata.
+  const destacada = useLocation().state?.destacar ?? null;
 
   const cargar = useCallback(() =>
     api.get('/solicitudes/mias').then((r) => setSolicitudes(r.data)).catch(() => {}), []);
@@ -31,11 +40,18 @@ export default function MisSolicitudes() {
 
   const tipoElegido = tipos.find((t) => String(t.id) === String(form.id_tipo));
   const esVacaciones = /vacaciones/i.test(tipoElegido?.nombre || '');
+  const requiereDoc  = !!tipoElegido?.requiere_doc;
+  /**
+   * Una constancia laboral o de ingresos no es una ausencia: el trabajador
+   * sigue asistiendo. Solo lleva la fecha en que se pide, sin rango ni dias
+   * habiles. Mientras no se elija tipo se asume ausencia (el caso habitual).
+   */
+  const esAusencia = tipoElegido ? tipoElegido.es_ausencia !== false : true;
 
-  // Previsualiza los días hábiles del rango elegido, para que el empleado vea
-  // exactamente cuánto le van a descontar antes de enviar.
+  // Previsualiza los días hábiles del rango antes de enviar la solicitud.
+  // No aplica a los trámites de documento: no consumen días.
   useEffect(() => {
-    if (!form.fecha_inicio) { setCalculo(null); return; }
+    if (!esAusencia || !form.fecha_inicio) { setCalculo(null); return; }
     const fin = form.fecha_fin || form.fecha_inicio;
     if (fin < form.fecha_inicio) { setCalculo(null); return; }
 
@@ -46,19 +62,76 @@ export default function MisSolicitudes() {
         .catch(() => { if (vigente) setCalculo(null); });
     }, 300);
     return () => { vigente = false; clearTimeout(t); };
-  }, [form.fecha_inicio, form.fecha_fin]);
+  }, [esAusencia, form.fecha_inicio, form.fecha_fin]);
 
-  const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
+  /**
+   * Cambiar el tipo empieza una solicitud distinta, así que se limpia lo ya
+   * escrito. Un motivo como "a nombre de Banrural" pertenece a la constancia
+   * que se estaba pidiendo, no al permiso médico que se elige después; si se
+   * queda ahí, se envía por descuido. Las fechas tampoco se conservan: un
+   * trámite de documento lleva una sola fecha y una ausencia lleva un rango.
+   */
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+
+    if (name === 'id_tipo') {
+      if (String(value) === String(form.id_tipo)) return;  // misma opción: nada que limpiar
+      setForm({ ...formVacio, id_tipo: value });
+      setArchivo(null);
+      setCalculo(null);
+      return;
+    }
+
+    setForm({ ...form, [name]: value });
+  };
+
+  // Se valida aqui para no crear la solicitud si el archivo va a ser rechazado.
+  const elegirArchivo = (e) => {
+    const elegido = e.target.files?.[0];
+    e.target.value = '';
+    if (!elegido) return;
+    if (!TIPOS_ARCHIVO.includes(elegido.type)) {
+      return toast.error('Solo se aceptan PDF, JPG, PNG o WEBP.');
+    }
+    if (elegido.size > MAX_ARCHIVO_MB * 1048576) {
+      return toast.error(`El archivo supera el límite de ${MAX_ARCHIVO_MB} MB.`);
+    }
+    setArchivo(elegido);
+  };
+
+  const cerrarModal = () => {
+    setModal(false);
+    setForm(formVacio);
+    setCalculo(null);
+    setArchivo(null);
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (requiereDoc && !archivo) {
+      return toast.error('Este trámite requiere un documento de respaldo.');
+    }
     setEnviando(true);
     try {
       const { data } = await api.post('/solicitudes', form);
-      toast.success(`Solicitud enviada (${data.solicitud.dias_habiles} días hábiles)`);
-      setModal(false);
-      setForm(formVacio);
-      setCalculo(null);
+      const dias = data.solicitud.dias_habiles;
+
+      if (archivo) {
+        // La solicitud ya existe: si el adjunto falla, se avisa para no perderla.
+        const datos = new FormData();
+        datos.append('documento', archivo);
+        try {
+          await api.post(`/solicitudes/${data.solicitud.id}/documentos`, datos);
+          toast.success(`Solicitud enviada con respaldo (${dias} días hábiles)`);
+        } catch (err) {
+          toast.error(err.response?.data?.error
+            || 'Se creó la solicitud, pero el documento no subió. Adjúntelo desde el clip.');
+        }
+      } else {
+        toast.success(`Solicitud enviada (${dias} días hábiles)`);
+      }
+
+      cerrarModal();
       cargar();
       api.get('/vacaciones/mi-saldo').then((r) => setSaldo(r.data)).catch(() => {});
     } catch (err) {
@@ -118,7 +191,9 @@ export default function MisSolicitudes() {
     }
   };
 
-  const pendientes = solicitudes.filter((x) => x.estado === 'Pendiente').length;
+  // Coincide con ESTADOS_EDITABLES: mientras siga pendiente o en revision, la
+  // solicitud no tiene respuesta todavia.
+  const pendientes = solicitudes.filter((x) => ESTADOS_EDITABLES.includes(x.estado)).length;
   const aprobadas  = solicitudes.filter((x) => x.estado === 'Aprobada').length;
   const rechazadas = solicitudes.filter((x) => x.estado === 'Rechazada').length;
 
@@ -169,11 +244,12 @@ export default function MisSolicitudes() {
           </thead>
           <tbody>
             {solicitudes.map((sol) => (
-              <tr key={sol.id}>
+              <tr key={sol.id}
+                style={sol.id === destacada ? s.filaDestacada : undefined}>
                 <td style={s.td}>{sol.id}</td>
                 <td style={s.td}>{sol.tipo_solicitud}</td>
-                <td style={s.td}>{new Date(sol.fecha_inicio).toLocaleDateString('es-GT')}</td>
-                <td style={s.td}>{sol.fecha_fin ? new Date(sol.fecha_fin).toLocaleDateString('es-GT') : '—'}</td>
+                <td style={s.td}>{fechaCorta(sol.fecha_inicio)}</td>
+                <td style={s.td}>{fechaCorta(sol.fecha_fin)}</td>
                 <td style={s.td}>
                   {sol.dias_habiles ?? sol.dias_solicitados ?? '—'}
                   {sol.dias_descontados > 0 && (
@@ -184,6 +260,11 @@ export default function MisSolicitudes() {
                 </td>
                 <td style={s.td}>
                   <span style={{ ...s.badge, background: colores[sol.estado] }}>{sol.estado}</span>
+                  {sol.numero_acuerdo && (
+                    <div style={s.acuerdo} title={`Libro ${sol.libro || '—'} · Folio ${sol.folio || '—'}`}>
+                      Acuerdo {sol.numero_acuerdo}
+                    </div>
+                  )}
                 </td>
                 <td style={{ ...s.td, maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {sol.motivo}
@@ -203,7 +284,6 @@ export default function MisSolicitudes() {
         )}
       </div>
 
-      {/* Modal nueva solicitud */}
       {modal && (
         <div style={s.overlay}>
           <div style={s.modal}>
@@ -215,10 +295,39 @@ export default function MisSolicitudes() {
                   <option value="">Seleccionar tipo...</option>
                   {tipos.map((t) => <option key={t.id} value={t.id}>{t.nombre}</option>)}
                 </select>
-                {tipoElegido?.requiere_doc && (
-                  <span style={s.pista}>Este trámite requiere documento de respaldo; podrá adjuntarlo al enviarlo.</span>
+                {requiereDoc && (
+                  <span style={s.pista}>Este trámite requiere documento de respaldo.</span>
                 )}
               </div>
+
+              {requiereDoc && (
+                <div style={s.campo}>
+                  <label style={s.label}>Documento de respaldo</label>
+                  {archivo ? (
+                    <div style={s.archivoElegido}>
+                      <Paperclip size={15} color="#0f766e" style={{ flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={s.docNombre}>{archivo.name}</p>
+                        <span style={s.docMeta}>{kb(archivo.size)}</span>
+                      </div>
+                      <button type="button" title="Quitar archivo"
+                        style={{ ...s.btnIcono, background: '#fee2e2', color: '#dc2626' }}
+                        onClick={() => setArchivo(null)}>
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ) : (
+                    <label style={s.zonaSubir}>
+                      <Upload size={16} /> Seleccionar archivo
+                      <input type="file" style={{ display: 'none' }} onChange={elegirArchivo}
+                        accept=".pdf,.jpg,.jpeg,.png,.webp" />
+                    </label>
+                  )}
+                  <span style={s.pista}>
+                    PDF o imagen (JPG, PNG, WEBP), hasta {MAX_ARCHIVO_MB} MB.
+                  </span>
+                </div>
+              )}
 
               {esVacaciones && saldo && (
                 <div style={{ ...s.saldoCaja, background: sinDerecho ? '#fef3c7' : '#f0fdfa',
@@ -231,17 +340,27 @@ export default function MisSolicitudes() {
                 </div>
               )}
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+              {esAusencia ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+                  <div style={s.campo}>
+                    <label style={s.label}>Fecha inicio</label>
+                    <input name="fecha_inicio" type="date" value={form.fecha_inicio} onChange={handleChange} required style={s.input} />
+                  </div>
+                  <div style={s.campo}>
+                    <label style={s.label}>Fecha fin (opcional)</label>
+                    <input name="fecha_fin" type="date" value={form.fecha_fin} onChange={handleChange}
+                      min={form.fecha_inicio || undefined} style={s.input} />
+                  </div>
+                </div>
+              ) : (
                 <div style={s.campo}>
-                  <label style={s.label}>Fecha inicio</label>
+                  <label style={s.label}>Fecha de solicitud</label>
                   <input name="fecha_inicio" type="date" value={form.fecha_inicio} onChange={handleChange} required style={s.input} />
+                  <span style={s.notaCampo}>
+                    Este trámite no descuenta días: es un documento que extiende Recursos Humanos.
+                  </span>
                 </div>
-                <div style={s.campo}>
-                  <label style={s.label}>Fecha fin (opcional)</label>
-                  <input name="fecha_fin" type="date" value={form.fecha_fin} onChange={handleChange}
-                    min={form.fecha_inicio || undefined} style={s.input} />
-                </div>
-              </div>
+              )}
 
               {calculo && (
                 <div style={{ ...s.calculo, borderColor: excedeSaldo ? '#fca5a5' : '#e2e8f0',
@@ -274,8 +393,7 @@ export default function MisSolicitudes() {
               </div>
 
               <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
-                <button type="button" style={s.btnCancelar}
-                  onClick={() => { setModal(false); setForm(formVacio); setCalculo(null); }}>
+                <button type="button" style={s.btnCancelar} onClick={cerrarModal}>
                   Cancelar
                 </button>
                 <button type="submit" style={{ ...s.btnGuardar, opacity: (excedeSaldo || sinDerecho || enviando) ? 0.5 : 1 }}
@@ -288,7 +406,6 @@ export default function MisSolicitudes() {
         </div>
       )}
 
-      {/* Modal documentos adjuntos */}
       {adjuntos && (
         <div style={s.overlay} onClick={() => setAdjuntos(null)}>
           <div style={{ ...s.modal, maxWidth: '460px' }} onClick={(e) => e.stopPropagation()}>
@@ -356,6 +473,8 @@ const s = {
   th:         { textAlign: 'left', padding: '.75rem 1rem', fontSize: '.8rem', color: '#64748b', background: '#f8fafc', borderBottom: '2px solid #e2e8f0', fontWeight: 600, whiteSpace: 'nowrap' },
   td:         { padding: '.75rem 1rem', fontSize: '.9rem', borderBottom: '1px solid #f1f5f9' },
   badge:      { padding: '.25rem .75rem', borderRadius: '99px', fontSize: '.75rem', color: '#fff', fontWeight: 500 },
+  acuerdo:    { fontSize: '.72rem', color: '#475569', marginTop: '.25rem', whiteSpace: 'nowrap' },
+  filaDestacada: { background: '#fffbeb', boxShadow: 'inset 3px 0 0 #f59e0b' },
   descontado: { marginLeft: '.4rem', fontSize: '.72rem', color: '#0f766e', background: '#ccfbf1', padding: '.1rem .4rem', borderRadius: '4px', fontWeight: 700 },
   btnClip:    { display: 'flex', alignItems: 'center', gap: '.25rem', background: '#f1f5f9', border: 'none', borderRadius: '6px', padding: '.3rem .55rem', color: '#475569', fontSize: '.8rem', fontWeight: 600, cursor: 'pointer' },
   overlay:    { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' },
@@ -368,6 +487,7 @@ const s = {
   saldoCaja:  { display: 'flex', alignItems: 'baseline', gap: '.5rem', border: '1.5px solid', borderRadius: '10px', padding: '.75rem 1rem' },
   saldoNum:   { fontSize: '1.5rem', color: '#0f766e', lineHeight: 1 },
   saldoTxt:   { fontSize: '.8rem', color: '#334155', lineHeight: 1.4 },
+  notaCampo:  { fontSize: '.78rem', color: '#64748b', marginTop: '.3rem', lineHeight: 1.4 },
   calculo:    { border: '1.5px solid', borderRadius: '10px', padding: '.75rem 1rem' },
   calculoTitulo: { fontSize: '.85rem', color: '#1e293b' },
   calculoNota:{ fontSize: '.75rem', color: '#64748b', marginTop: '.35rem', lineHeight: 1.4 },
@@ -376,6 +496,8 @@ const s = {
   docNombre:  { fontSize: '.85rem', color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   docMeta:    { fontSize: '.72rem', color: '#94a3b8' },
   btnIcono:   { background: '#e0f2fe', border: 'none', borderRadius: '6px', padding: '5px', display: 'flex', color: '#0369a1', cursor: 'pointer', flexShrink: 0 },
+  zonaSubir:  { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '.4rem', padding: '.85rem 1rem', border: '1.5px dashed #94a3b8', borderRadius: '8px', color: '#334155', fontWeight: 600, fontSize: '.85rem', cursor: 'pointer' },
+  archivoElegido: { display: 'flex', alignItems: 'center', gap: '.6rem', border: '1.5px solid #99f6e4', background: '#f0fdfa', borderRadius: '8px', padding: '.6rem .75rem' },
   btnSubir:   { display: 'inline-flex', alignItems: 'center', gap: '.4rem', marginTop: '1rem', padding: '.6rem 1rem', border: '1.5px dashed #94a3b8', borderRadius: '8px', color: '#334155', fontWeight: 600, fontSize: '.85rem', cursor: 'pointer' },
   btnCancelar:{ padding: '.7rem 1.5rem', border: '1.5px solid #e2e8f0', borderRadius: '8px', background: '#fff', color: '#64748b', fontWeight: 600, cursor: 'pointer' },
   btnGuardar: { padding: '.7rem 1.5rem', border: 'none', borderRadius: '8px', background: '#1e3a5f', color: '#fff', fontWeight: 600, cursor: 'pointer' },

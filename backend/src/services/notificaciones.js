@@ -2,31 +2,23 @@ const pool = require('../config/db');
 const sse = require('./sse');
 
 /**
- * Notificaciones al usuario.
- *
- * Guarda la notificacion en la tabla `notificaciones` (para que no se pierda si
- * el usuario no estaba conectado) y la empuja de inmediato por SSE a las
- * pestanas que si lo esten.
+ * Guarda la notificacion en base de datos (para que no se pierda si el usuario
+ * no estaba conectado) y la empuja por SSE a las pestanas conectadas.
  */
 
-/** Usuario activo ligado a un empleado. Devuelve null si el empleado no tiene cuenta. */
 async function usuarioDeEmpleado(idEmpleado, cliente = pool) {
   const { rows } = await cliente.query(
     'SELECT id FROM usuarios WHERE id_empleado = $1 AND activo = TRUE', [idEmpleado]);
   return rows[0]?.id ?? null;
 }
 
-/** Todos los usuarios de RRHH y administracion, para avisarles de solicitudes entrantes. */
 async function usuariosRRHH(cliente = pool) {
   const { rows } = await cliente.query(
     `SELECT id FROM usuarios WHERE activo = TRUE AND rol IN ('admin','rrhh')`);
   return rows.map((r) => r.id);
 }
 
-/**
- * Crea una notificacion y la empuja en vivo.
- * `cliente` permite incluirla en la transaccion de la operacion que la origina.
- */
+/** `cliente` permite incluirla en la transaccion que la origina. */
 async function notificar({ id_usuario, titulo, mensaje, id_solicitud = null }, cliente = pool) {
   if (!id_usuario) return null;
 
@@ -38,12 +30,10 @@ async function notificar({ id_usuario, titulo, mensaje, id_solicitud = null }, c
   );
   const noti = rows[0];
 
-  // El push va fuera de la transaccion logica: si esta se revierte, el usuario
-  // habra visto un aviso de algo que no ocurrio. Por eso se emite en el commit.
+  // El push se emite en el commit: si la transaccion se revierte, no debe avisar.
   return { ...noti, _destino: id_usuario };
 }
 
-/** Empuja por SSE notificaciones ya confirmadas en base de datos. */
 function emitirPendientes(notificaciones = []) {
   for (const n of notificaciones.filter(Boolean)) {
     const { _destino, ...datos } = n;
@@ -51,7 +41,6 @@ function emitirPendientes(notificaciones = []) {
   }
 }
 
-/** Notificaciones de un usuario, mas reciente primero. */
 async function listar(idUsuario, { soloNoLeidas = false, limite = 30 } = {}) {
   const { rows } = await pool.query(
     `SELECT n.id, n.titulo, n.mensaje, n.leida, n.id_solicitud, n.creado_en,

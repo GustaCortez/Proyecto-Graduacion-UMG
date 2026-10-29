@@ -1,11 +1,8 @@
 const pool = require('../config/db');
 
 /**
- * Registro de auditoria: quien hizo que, sobre que registro y cuando.
- *
- * Se apoya en la tabla `auditoria` (id_usuario, accion, tabla, registro_id,
- * detalle jsonb, ip). Acepta un cliente de transaccion para que el rastro se
- * confirme o se revierta junto con la operacion que lo origino.
+ * Registro de auditoria. Acepta un cliente de transaccion para que el rastro
+ * se confirme o se revierta junto con la operacion que lo origino.
  */
 
 const ACCIONES = {
@@ -24,21 +21,15 @@ const ACCIONES = {
   RESET_PASSWORD:    'RESET_PASSWORD',
   CAMBIO_ESTADO:     'CAMBIO_ESTADO',
   AJUSTE_VACACIONES: 'AJUSTE_VACACIONES',
-  NOMINA_CREADA:     'NOMINA_CREADA',
   SUBIR_DOCUMENTO:   'SUBIR_DOCUMENTO',
 };
 
-/** IP real del solicitante, recortada al limite de la columna. */
 const ipDe = (req) => {
   const cruda = req?.ip || req?.socket?.remoteAddress || null;
   return cruda ? String(cruda).replace(/^::ffff:/, '').slice(0, 45) : null;
 };
 
-/**
- * Escribe una entrada de auditoria.
- * Nunca lanza: un fallo al auditar no debe tumbar la operacion del usuario,
- * pero si queda registrado en consola para poder investigarlo.
- */
+/** Nunca lanza: un fallo al auditar no debe tumbar la operacion del usuario. */
 async function registrar(req, { accion, tabla = null, registro_id = null, detalle = null, id_usuario }, cliente = pool) {
   try {
     const usuario = id_usuario !== undefined ? id_usuario : req?.usuario?.id ?? null;
@@ -52,7 +43,6 @@ async function registrar(req, { accion, tabla = null, registro_id = null, detall
   }
 }
 
-/** Consulta paginada del rastro, con filtros opcionales. Solo para admin/RRHH. */
 async function consultar({ limite = 50, desplazamiento = 0, accion, tabla, id_usuario, desde, hasta } = {}) {
   const cond = [];
   const par = [];
@@ -67,9 +57,7 @@ async function consultar({ limite = 50, desplazamiento = 0, accion, tabla, id_us
   const where = cond.length ? `WHERE ${cond.join(' AND ')}` : '';
   par.push(Math.min(Number(limite) || 50, 200), Number(desplazamiento) || 0);
 
-  // Se resuelve el nombre del empleado que aparece dentro del detalle para que la
-  // pantalla no tenga que mostrar un id suelto. El CASE evita que el cast falle
-  // si algún detalle guardara ahí un valor que no sea numérico.
+  // El CASE evita que el cast falle si el detalle guarda algo no numerico.
   const { rows } = await pool.query(
     `SELECT a.id, a.accion, a.tabla, a.registro_id, a.detalle, a.ip, a.creado_en,
             u.username, u.rol,

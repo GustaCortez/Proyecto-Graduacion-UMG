@@ -1,17 +1,14 @@
-const fs = require('fs');
 const pool = require('../config/db');
-const { descartar, rutaSegura } = require('../middleware/upload.middleware');
+const almacenamiento = require('../services/almacenamiento');
 const auditoria = require('../services/auditoria');
 
 const esRRHH = (req) => ['admin', 'rrhh'].includes(req.usuario.rol);
 
+const claveDoc = (nombre) => almacenamiento.clave('documentos', nombre);
+
 /** Estados en los que el empleado todavia puede modificar sus adjuntos. */
 const ESTADOS_EDITABLES = ['Pendiente', 'En revision'];
 
-/**
- * Devuelve la solicitud si el usuario puede verla, o null.
- * Un empleado solo alcanza las suyas; RRHH y admin alcanzan todas.
- */
 async function solicitudAccesible(req, idSolicitud) {
   const { rows } = await pool.query(
     `SELECT s.id, s.id_empleado, s.estado, t.nombre AS tipo, t.requiere_doc
@@ -45,25 +42,41 @@ const subir = async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'Adjunte un archivo en el campo "documento".' });
   }
+  const clave = claveDoc(req.file.filename);
   try {
     const sol = await solicitudAccesible(req, req.params.id);
     if (!sol) {
-      descartar(req.file);
       return res.status(404).json({ error: 'Solicitud no encontrada.' });
     }
     if (!esRRHH(req) && !ESTADOS_EDITABLES.includes(sol.estado)) {
-      descartar(req.file);
       return res.status(400).json({
         error: `No se pueden adjuntar documentos a una solicitud en estado "${sol.estado}".`,
       });
     }
 
-    const { rows } = await pool.query(
-      `INSERT INTO documentos_adjuntos
-         (id_solicitud, nombre_archivo, ruta_archivo, tipo_mime, tamano_bytes)
-       VALUES ($1,$2,$3,$4,$5)
-       RETURNING id, nombre_archivo, tipo_mime, tamano_bytes, subido_en`,
-      [sol.id, req.file.originalname, req.file.filename, req.file.mimetype, req.file.size]);
+    // Primero el archivo y luego la fila: si el almacenamiento falla no queda
+    // una fila que apunte a un archivo inexistente.
+    try {
+      await almacenamiento.guardar(req.file.buffer, clave, req.file.mimetype);
+    } catch (err) {
+      console.error('[documentos] no se pudo guardar el archivo:', err.message);
+      return res.status(500).json({
+        error: 'No se pudo guardar el archivo en el almacenamiento de archivos. Intente de nuevo.',
+      });
+    }
+
+    let rows;
+    try {
+      ({ rows } = await pool.query(
+        `INSERT INTO documentos_adjuntos
+           (id_solicitud, nombre_archivo, ruta_archivo, tipo_mime, tamano_bytes)
+         VALUES ($1,$2,$3,$4,$5)
+         RETURNING id, nombre_archivo, tipo_mime, tamano_bytes, subido_en`,
+        [sol.id, req.file.originalname, req.file.filename, req.file.mimetype, req.file.size]));
+    } catch (err) {
+      await almacenamiento.eliminar(clave).catch(() => {});
+      throw err;
+    }
 
     await auditoria.registrar(req, {
       accion: auditoria.ACCIONES.SUBIR_DOCUMENTO,
@@ -77,7 +90,6 @@ const subir = async (req, res) => {
 
     res.status(201).json({ mensaje: 'Documento adjuntado.', documento: rows[0] });
   } catch (err) {
-    descartar(req.file);
     console.error(err.message);
     res.status(500).json({ error: 'Error al adjuntar el documento.' });
   }
@@ -95,16 +107,21 @@ const descargar = async (req, res) => {
     if (rows.length === 0) return res.status(404).json({ error: 'Documento no encontrado.' });
 
     const doc = rows[0];
-    const ruta = rutaSegura('documentos', doc.ruta_archivo);
-    if (!ruta || !fs.existsSync(ruta)) {
+    const clave = claveDoc(doc.ruta_archivo);
+    const archivo = clave ? await almacenamiento.obtener(clave) : null;
+    if (!archivo) {
       return res.status(404).json({ error: 'El archivo ya no esta disponible en el servidor.' });
     }
 
     res.setHeader('Content-Type', doc.tipo_mime || 'application/octet-stream');
-    // El nombre se envia entre comillas y sin saltos de linea para no romper la cabecera.
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    // Entre comillas y sin saltos de linea para no romper la cabecera.
     const nombre = String(doc.nombre_archivo).replace(/["\r\n]/g, '');
-    res.setHeader('Content-Disposition', `inline; filename="${nombre}"`);
-    fs.createReadStream(ruta).pipe(res);
+    // Las imagenes se muestran; el PDF se descarga. Un PDF puede llevar scripts
+    // y abrirlo "inline" lo ejecutaria dentro del navegador del revisor.
+    const disposicion = String(doc.tipo_mime || '').startsWith('image/') ? 'inline' : 'attachment';
+    res.setHeader('Content-Disposition', `${disposicion}; filename="${nombre}"`);
+    almacenamiento.enviar(res, archivo);
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: 'Error al descargar el documento.' });
@@ -127,8 +144,8 @@ const eliminar = async (req, res) => {
       [req.params.idDoc, sol.id]);
     if (rows.length === 0) return res.status(404).json({ error: 'Documento no encontrado.' });
 
-    const ruta = rutaSegura('documentos', rows[0].ruta_archivo);
-    if (ruta) fs.promises.unlink(ruta).catch(() => {});
+    const clave = claveDoc(rows[0].ruta_archivo);
+    if (clave) almacenamiento.eliminar(clave).catch(() => {});
 
     await auditoria.registrar(req, {
       accion: auditoria.ACCIONES.ELIMINAR,

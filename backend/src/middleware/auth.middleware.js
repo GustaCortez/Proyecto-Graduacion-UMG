@@ -1,27 +1,18 @@
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
-/**
- * Códigos de error para que el cliente sepa qué hacer:
- *   TOKEN_EXPIRADO -> renovar con el refresh token y reintentar (401)
- *   TOKEN_INVALIDO -> cerrar sesión (401)
- *   SIN_PERMISO    -> el usuario está bien autenticado, pero su rol no alcanza (403)
- *
- * La distinción importa: antes un token vencido y una denegación por rol
- * devolvían ambos 403, así que el frontend no podía decidir entre renovar la
- * sesión o mandar al login.
- */
 
 const verificarToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+  const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) {
     return res.status(401).json({ error: 'Acceso denegado. Token requerido.', codigo: 'SIN_TOKEN' });
   }
 
   try {
-    req.usuario = jwt.verify(token, process.env.JWT_SECRET);
+    // Enforce accepted algorithms to avoid alg: none or unexpected algorithms.
+    req.usuario = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
     next();
   } catch (err) {
     if (err.name === 'TokenExpiredError') {
@@ -31,14 +22,16 @@ const verificarToken = (req, res, next) => {
   }
 };
 
-/** Exige rol administrativo. Hoy admin y rrhh comparten permisos. */
+
 const soloAdmin = (req, res, next) => {
-  if (!['admin', 'rrhh'].includes(req.usuario.rol)) {
-    return res.status(403).json({ error: 'Acceso denegado.', codigo: 'SIN_PERMISO' });
+  if (req.usuario.rol !== 'admin') {
+    return res.status(403).json({
+      error: 'Esta operación solo la puede realizar un administrador.', codigo: 'SIN_PERMISO' });
   }
   next();
 };
 
+/** Gestión de personal: administración y RRHH. */
 const soloRRHH = (req, res, next) => {
   if (!['admin', 'rrhh'].includes(req.usuario.rol)) {
     return res.status(403).json({ error: 'Solo personal RRHH.', codigo: 'SIN_PERMISO' });

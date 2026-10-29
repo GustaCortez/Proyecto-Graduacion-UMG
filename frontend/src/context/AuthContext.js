@@ -25,22 +25,17 @@ export const AuthProvider = ({ children }) => {
     setUsuario(datosUsuario);
   }, []);
 
-  /**
-   * Cierra la sesión también en el servidor: sin esto el refresh token seguiría
-   * siendo válido hasta su vencimiento aunque el usuario creyera haber salido.
-   */
+  /** Cierra sesión también en el servidor; si no, el refresh token seguiría vivo. */
   const logout = useCallback(async () => {
     const refreshToken = almacen.refresh;
     try {
       await api.post('/auth/logout', { refreshToken });
     } catch {
-      // Si el servidor no responde igual se limpia el lado del cliente.
     }
     almacen.limpiar();
     setUsuario(null);
   }, []);
 
-  /** Refresca los datos del usuario en memoria (por ejemplo, tras subir una foto). */
   const actualizarUsuario = useCallback((cambios) => {
     setUsuario((previo) => {
       const nuevo = { ...previo, ...cambios };

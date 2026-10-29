@@ -1,57 +1,34 @@
-const express  = require('express');
-const cors     = require('cors');
-const helmet   = require('helmet');
-const morgan   = require('morgan');
 require('dotenv').config();
 
-const app = express();
+/**
+ * Comprobaciones de arranque. Es preferible que el servidor no levante a que
+ * levante inseguro: un JWT_SECRET corto o el de ejemplo permite firmar tokens
+ * de administrador, y el fallo seria silencioso.
+ */
+const SECRETO_DE_EJEMPLO = 'cadena_larga_y_aleatoria_no_usar_esta';
+const secreto = process.env.JWT_SECRET;
 
-// Express queda detrás de un proxy en producción; sin esto req.ip devolvería
-// siempre la IP del proxy y la auditoría registraría datos inútiles.
-app.set('trust proxy', 1);
+if (!secreto || secreto === SECRETO_DE_EJEMPLO || secreto.length < 32) {
+  console.error(
+    '\n[arranque cancelado] JWT_SECRET ausente, de ejemplo o demasiado corto.\n' +
+    'Genere uno nuevo y pongalo en backend/.env:\n' +
+    '  node -e "console.log(require(\'crypto\').randomBytes(48).toString(\'hex\'))"\n');
+  process.exit(1);
+}
 
-// Middlewares globales
-app.use(helmet());
-app.use(cors({ origin: 'http://localhost:3000', credentials: true }));
+// En la nube la base viene como una sola cadena; en local, como variables sueltas.
+if (!process.env.DATABASE_URL) {
+  for (const clave of ['DB_HOST', 'DB_NAME', 'DB_USER']) {
+    if (!process.env[clave]) {
+      console.error(`\n[arranque cancelado] Falta ${clave} en backend/.env `
+        + '(o defina DATABASE_URL con la cadena completa).\n');
+      process.exit(1);
+    }
+  }
+}
 
-// El ticket del canal SSE viaja en la URL; se oculta del log de acceso para
-// que no quede escrito en disco.
-morgan.token('url-limpia', (req) => req.originalUrl.replace(/ticket=[^&]+/, 'ticket=***'));
-app.use(morgan(':method :url-limpia :status :response-time ms'));
+const app = require('./app');
 
-app.use(express.json());
-
-// Rutas
-app.use('/api/auth',           require('./src/routes/auth.routes'));
-app.use('/api/empleados',      require('./src/routes/empleados.routes'));
-app.use('/api/solicitudes',    require('./src/routes/solicitudes.routes'));
-app.use('/api/dashboard',      require('./src/routes/dashboard.routes'));
-app.use('/api/usuarios',       require('./src/routes/usuarios.routes'));
-app.use('/api/vacaciones',     require('./src/routes/vacaciones.routes'));
-app.use('/api/notas-pago',     require('./src/routes/notas_pago.routes'));
-app.use('/api/notificaciones', require('./src/routes/notificaciones.routes'));
-app.use('/api/feriados',       require('./src/routes/feriados.routes'));
-app.use('/api/auditoria',      require('./src/routes/auditoria.routes'));
-
-// Ruta de prueba
-app.get('/', (req, res) => {
-  res.json({ mensaje: 'API Municipalidad funcionando' });
-});
-
-// Manejo de rutas no encontradas
-app.use((req, res) => {
-  res.status(404).json({ error: 'Ruta no encontrada' });
-});
-
-// Último recurso: cualquier error no capturado sale como JSON, nunca como
-// traza de pila (que revelaría rutas internas del servidor).
-app.use((err, req, res, next) => {
-  console.error('[error no capturado]', err.message);
-  if (res.headersSent) return next(err);
-  res.status(500).json({ error: 'Error interno del servidor.' });
-});
-
-// Iniciar servidor
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en http://localhost:${PORT}`);

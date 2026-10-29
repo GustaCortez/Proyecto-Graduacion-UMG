@@ -6,18 +6,20 @@ const auditoria = require('../services/auditoria');
 require('dotenv').config();
 
 /**
- * Autenticación con token de acceso corto + refresh token rotativo.
+ * Token de acceso corto + refresh token rotativo. El refresh se guarda como
+ * SHA-256, rota en cada uso y el reúso de uno ya revocado se trata como robo:
+ * cierra todas las sesiones del usuario.
  *
- * Antes el JWT duraba 8 horas: si se filtraba, servía 8 horas. Ahora el token
- * de acceso vive pocos minutos y se renueva solo, con un refresh token que:
- *   - se guarda en base de datos como SHA-256 (el valor en claro nunca se almacena),
- *   - rota en cada uso: el anterior queda revocado y enlazado al nuevo,
- *   - si alguien reutiliza uno ya revocado se asume robo y se cierran todas
- *     las sesiones de ese usuario.
+ * Excepción: ventana de gracia. El frontend guarda el refresh en localStorage,
+ * compartido entre pestañas; si dos pestañas renuevan a la vez, la segunda
+ * llega con el token que la primera acabó de rotar. Eso no es robo: si el
+ * token recibido fue revocado hace menos de GRACIA_SEGUNDOS y su reemplazo
+ * sigue vigente, se rota a partir del reemplazo y se entrega el par nuevo.
  */
 
-const ACCESO_EXPIRA = process.env.ACCESS_TOKEN_EXPIRES_IN || '15m';
-const REFRESH_DIAS  = Number(process.env.REFRESH_TOKEN_DAYS) || 7;
+const ACCESO_EXPIRA  = process.env.ACCESS_TOKEN_EXPIRES_IN || '15m';
+const REFRESH_DIAS   = Number(process.env.REFRESH_TOKEN_DAYS) || 7;
+const GRACIA_SEGUNDOS = 30;
 
 const hash = (valor) => crypto.createHash('sha256').update(valor).digest('hex');
 
@@ -30,9 +32,8 @@ const datosToken = (usuario) => ({
 });
 
 const firmarAcceso = (usuario) =>
-  jwt.sign(datosToken(usuario), process.env.JWT_SECRET, { expiresIn: ACCESO_EXPIRA });
+  jwt.sign(datosToken(usuario), process.env.JWT_SECRET, { expiresIn: ACCESO_EXPIRA, algorithm: 'HS256' });
 
-/** Crea un refresh token, guarda solo su hash y devuelve el valor en claro. */
 async function emitirRefresh(idUsuario, req, cliente = pool, reemplazaA = null) {
   const enClaro = crypto.randomBytes(48).toString('hex');
   const expira  = new Date(Date.now() + REFRESH_DIAS * 24 * 60 * 60 * 1000);
@@ -50,12 +51,31 @@ async function emitirRefresh(idUsuario, req, cliente = pool, reemplazaA = null) 
   return { token: enClaro, expira, id: rows[0].id };
 }
 
-/** Revoca todas las sesiones vivas de un usuario. */
 async function revocarTodos(idUsuario, cliente = pool) {
   const { rowCount } = await cliente.query(
     `UPDATE refresh_tokens SET revocado_en = NOW()
       WHERE id_usuario = $1 AND revocado_en IS NULL`, [idUsuario]);
   return rowCount;
+}
+
+/**
+ * Si `fila` (un refresh ya revocado) fue reemplazado hace menos de
+ * GRACIA_SEGUNDOS por un token que sigue vigente, devuelve ese token (bloqueado
+ * con FOR UPDATE para rotarlo). En cualquier otro caso devuelve null y el reúso
+ * se trata como robo. El refresh en claro no se guarda (solo su hash), así que
+ * no se puede "devolver el vigente": se rota a partir de él.
+ */
+async function reemplazoVigente(cliente, fila) {
+  const hace = Number(fila.revocado_hace_seg);
+  if (!fila.reemplazado_por || !Number.isFinite(hace) || hace < 0 || hace >= GRACIA_SEGUNDOS) {
+    return null;
+  }
+  const { rows } = await cliente.query(
+    `SELECT id FROM refresh_tokens
+      WHERE id = $1 AND id_usuario = $2 AND revocado_en IS NULL AND expira_en > NOW()
+      FOR UPDATE`,
+    [fila.reemplazado_por, fila.id_usuario]);
+  return rows[0] || null;
 }
 
 const login = async (req, res) => {
@@ -116,7 +136,6 @@ const login = async (req, res) => {
   }
 };
 
-/** Canjea un refresh token por uno nuevo más un token de acceso fresco. */
 const refrescar = async (req, res) => {
   const { refreshToken } = req.body;
   if (!refreshToken) {
@@ -127,8 +146,11 @@ const refrescar = async (req, res) => {
   try {
     await cli.query('BEGIN');
 
+    // El tiempo desde la revocación se mide con el reloj de la base, el mismo
+    // que puso revocado_en; así no influye la zona ni el desfase del servidor.
     const { rows } = await cli.query(
-      `SELECT rt.id, rt.id_usuario, rt.expira_en, rt.revocado_en,
+      `SELECT rt.id, rt.id_usuario, rt.expira_en, rt.revocado_en, rt.reemplazado_por,
+              EXTRACT(EPOCH FROM (NOW() - rt.revocado_en)) AS revocado_hace_seg,
               u.username, u.rol, u.activo, u.id_empleado,
               e.nombres, e.apellidos
          FROM refresh_tokens rt
@@ -145,19 +167,29 @@ const refrescar = async (req, res) => {
       return res.status(401).json({ error: 'Sesión inválida. Vuelva a iniciar sesión.' });
     }
 
-    // Reúso de un token ya revocado: señal de robo. Se cierran todas las sesiones.
-    if (fila.revocado_en) {
-      const cerradas = await revocarTodos(fila.id_usuario, cli);
-      await auditoria.registrar(req, {
-        accion: auditoria.ACCIONES.TOKEN_REUSADO, tabla: 'refresh_tokens', registro_id: fila.id,
-        detalle: { motivo: 'refresh token revocado reutilizado', sesiones_cerradas: cerradas },
-        id_usuario: fila.id_usuario }, cli);
-      await cli.query('COMMIT');
-      return res.status(401).json({
-        error: 'Se detectó un uso indebido de la sesión. Por seguridad se cerraron todas las sesiones.' });
-    }
+    // Token que se revoca en esta renovación. Normalmente el recibido; en la
+    // ventana de gracia, el que lo reemplazó.
+    let aRotar = fila.id;
+    let gracia = false;
 
-    if (new Date(fila.expira_en) <= new Date()) {
+    if (fila.revocado_en) {
+      const vigente = await reemplazoVigente(cli, fila);
+
+      if (!vigente) {
+        // Reúso de un token revocado fuera de la ventana de gracia: se asume robo.
+        const cerradas = await revocarTodos(fila.id_usuario, cli);
+        await auditoria.registrar(req, {
+          accion: auditoria.ACCIONES.TOKEN_REUSADO, tabla: 'refresh_tokens', registro_id: fila.id,
+          detalle: { motivo: 'refresh token revocado reutilizado', sesiones_cerradas: cerradas },
+          id_usuario: fila.id_usuario }, cli);
+        await cli.query('COMMIT');
+        return res.status(401).json({
+          error: 'Se detectó un uso indebido de la sesión. Por seguridad se cerraron todas las sesiones.' });
+      }
+
+      aRotar = vigente.id;
+      gracia = true;
+    } else if (new Date(fila.expira_en) <= new Date()) {
       await cli.query('ROLLBACK');
       return res.status(401).json({ error: 'La sesión expiró. Vuelva a iniciar sesión.' });
     }
@@ -168,13 +200,16 @@ const refrescar = async (req, res) => {
       return res.status(403).json({ error: 'El usuario fue desactivado.' });
     }
 
-    // Rotación: se revoca el actual y se emite uno nuevo enlazado a él.
-    await cli.query('UPDATE refresh_tokens SET revocado_en = NOW() WHERE id = $1', [fila.id]);
-    const nuevo = await emitirRefresh(fila.id_usuario, req, cli, fila.id);
+    await cli.query('UPDATE refresh_tokens SET revocado_en = NOW() WHERE id = $1', [aRotar]);
+    const nuevo = await emitirRefresh(fila.id_usuario, req, cli, aRotar);
 
     await auditoria.registrar(req, {
       accion: auditoria.ACCIONES.TOKEN_RENOVADO, tabla: 'refresh_tokens', registro_id: nuevo.id,
-      detalle: { anterior: fila.id }, id_usuario: fila.id_usuario }, cli);
+      detalle: gracia
+        ? { anterior: aRotar, gracia: true, reutilizado: fila.id,
+            motivo: 'renovación simultánea desde otra pestaña' }
+        : { anterior: fila.id },
+      id_usuario: fila.id_usuario }, cli);
 
     await cli.query('COMMIT');
 
@@ -204,7 +239,6 @@ const refrescar = async (req, res) => {
   }
 };
 
-/** Cierra la sesión actual, o todas si se pide. */
 const logout = async (req, res) => {
   const { refreshToken, todas } = req.body || {};
   try {
@@ -255,7 +289,6 @@ const perfil = async (req, res) => {
   }
 };
 
-/** Sesiones activas del usuario, para que pueda revisarlas y cerrarlas. */
 const sesiones = async (req, res) => {
   try {
     const { rows } = await pool.query(

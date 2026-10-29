@@ -5,23 +5,28 @@ import Layout      from './components/Layout';
 import Login       from './pages/auth/Login';
 import Dashboard   from './pages/dashboard/Dashboard';
 import Empleados   from './pages/empleados/Empleados';
+import Expediente  from './pages/empleados/Expediente';
 import Solicitudes from './pages/solicitudes/Solicitudes';
 import Usuarios    from './pages/usuarios/Usuarios';
 import Vacaciones  from './pages/vacaciones/Vacaciones';
 import Reportes    from './pages/reportes/Reportes';
 import MiPerfil       from './pages/perfil/MiPerfil';
 import MisSolicitudes from './pages/solicitudes/MisSolicitudes';
-import NotasDePago      from './pages/notas-pago/NotasDePago';
-import GestionNotasPago from './pages/notas-pago/GestionNotasPago';
-import Asuetos        from './pages/asuetos/Asuetos';
 import Auditoria      from './pages/auditoria/Auditoria';
 import MisVacaciones  from './pages/vacaciones/MisVacaciones';
 
-const RutaProtegida = ({ children, soloAdmin }) => {
+/**
+ * soloRRHH  -> administracion y RRHH (gestion de personal)
+ * soloAdmin -> unicamente el administrador (cuentas de usuario)
+ * Debe reflejar exactamente lo que valida el backend; esto es comodidad de
+ * navegacion, la autorizacion real esta en la API.
+ */
+const RutaProtegida = ({ children, soloRRHH, soloAdmin }) => {
   const { usuario, cargando } = useAuth();
   if (cargando) return <div style={{ display:'flex', justifyContent:'center', alignItems:'center', height:'100vh' }}>Cargando...</div>;
   if (!usuario) return <Navigate to="/login" replace />;
-  if (soloAdmin && !['admin','rrhh'].includes(usuario.rol)) return <Navigate to="/mis-solicitudes" replace />;
+  if (soloRRHH && !['admin','rrhh'].includes(usuario.rol)) return <Navigate to="/mis-solicitudes" replace />;
+  if (soloAdmin && usuario.rol !== 'admin') return <Navigate to="/dashboard" replace />;
   return <Layout>{children}</Layout>;
 };
 
@@ -39,21 +44,17 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
 
-          {/* Solo admin/rrhh */}
-          <Route path="/dashboard"       element={<RutaProtegida soloAdmin><Dashboard /></RutaProtegida>} />
-          <Route path="/empleados"       element={<RutaProtegida soloAdmin><Empleados /></RutaProtegida>} />
-          <Route path="/solicitudes"     element={<RutaProtegida soloAdmin><Solicitudes /></RutaProtegida>} />
-          <Route path="/gestion-nomina"  element={<RutaProtegida soloAdmin><GestionNotasPago /></RutaProtegida>} />
+          <Route path="/dashboard"       element={<RutaProtegida soloRRHH><Dashboard /></RutaProtegida>} />
+          <Route path="/empleados"       element={<RutaProtegida soloRRHH><Empleados /></RutaProtegida>} />
+          <Route path="/empleados/:id/expediente" element={<RutaProtegida soloRRHH><Expediente /></RutaProtegida>} />
+          <Route path="/solicitudes"     element={<RutaProtegida soloRRHH><Solicitudes /></RutaProtegida>} />
           <Route path="/usuarios"        element={<RutaProtegida soloAdmin><Usuarios /></RutaProtegida>} />
-          <Route path="/vacaciones"      element={<RutaProtegida soloAdmin><Vacaciones /></RutaProtegida>} />
-          <Route path="/asuetos"         element={<RutaProtegida soloAdmin><Asuetos /></RutaProtegida>} />
-          <Route path="/auditoria"       element={<RutaProtegida soloAdmin><Auditoria /></RutaProtegida>} />
-          <Route path="/reportes"        element={<RutaProtegida soloAdmin><Reportes /></RutaProtegida>} />
+          <Route path="/vacaciones"      element={<RutaProtegida soloRRHH><Vacaciones /></RutaProtegida>} />
+          <Route path="/auditoria"       element={<RutaProtegida soloRRHH><Auditoria /></RutaProtegida>} />
+          <Route path="/reportes"        element={<RutaProtegida soloRRHH><Reportes /></RutaProtegida>} />
 
-          {/* Cualquier usuario autenticado */}
           <Route path="/mis-solicitudes" element={<RutaProtegida><MisSolicitudes /></RutaProtegida>} />
           <Route path="/mis-vacaciones"  element={<RutaProtegida><MisVacaciones /></RutaProtegida>} />
-          <Route path="/notas-pago"      element={<RutaProtegida><NotasDePago /></RutaProtegida>} />
           <Route path="/mi-perfil"       element={<RutaProtegida><MiPerfil /></RutaProtegida>} />
 
           <Route path="*" element={<RutaProtegida><RedirectPorRol /></RutaProtegida>} />

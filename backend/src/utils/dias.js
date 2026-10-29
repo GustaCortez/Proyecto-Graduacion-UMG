@@ -23,6 +23,36 @@ const sumarDias = (fecha, n) => {
 const isoDeUTC = (d) => d.toISOString().slice(0, 10);
 
 /**
+ * Tope de dias calendario que admite un rango (inicio y fin inclusive). El
+ * conteo de dias habiles recorre el rango dia por dia; sin tope, una fecha
+ * fin como 9999-12-31 dejaria el servidor ocupado millones de iteraciones.
+ * 92 dias cubre con holgura un trimestre; las vacaciones maximas son 25 habiles.
+ */
+const MAX_DIAS_RANGO = 92;
+
+const RE_FECHA_ISO = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Valida que el valor sea una fecha real en formato estricto 'YYYY-MM-DD'.
+ * Date.parse acepta cosas como "March 5" o "2026-02-30"; aqui no.
+ */
+function esFechaISO(v) {
+  if (typeof v !== 'string' || !RE_FECHA_ISO.test(v)) return false;
+  const [a, m, d] = v.split('-').map(Number);
+  const f = new Date(Date.UTC(a, m - 1, d));
+  return f.getUTCFullYear() === a && f.getUTCMonth() === m - 1 && f.getUTCDate() === d;
+}
+
+/** Dias calendario entre dos fechas (0 si son el mismo dia; negativo si estan invertidas). */
+const diasCalendario = (desde, hasta) => Math.round((aUTC(hasta) - aUTC(desde)) / 86400000);
+
+function exigirRangoAcotado(desde, hasta) {
+  if (diasCalendario(desde, hasta) > MAX_DIAS_RANGO) {
+    throw new RangeError(`El rango no puede superar ${MAX_DIAS_RANGO} días.`);
+  }
+}
+
+/**
  * Domingo de Pascua (algoritmo de Meeus/Jones/Butcher para el calendario gregoriano).
  * Sirve para derivar Jueves Santo, Viernes Santo y Sabado de Gloria, que son moviles.
  */
@@ -75,6 +105,7 @@ async function contarDiasHabiles(inicio, fin, cliente = pool) {
   const desde = aISO(inicio);
   const hasta = aISO(fin || inicio);
   if (hasta < desde) return 0;
+  exigirRangoAcotado(desde, hasta);
 
   const { rows } = await cliente.query(
     `SELECT TO_CHAR(fecha, 'YYYY-MM-DD') AS fecha
@@ -99,6 +130,7 @@ async function contarDiasHabiles(inicio, fin, cliente = pool) {
 async function detalleDiasHabiles(inicio, fin, cliente = pool) {
   const desde = aISO(inicio);
   const hasta = aISO(fin || inicio);
+  exigirRangoAcotado(desde, hasta);
   const { rows } = await cliente.query(
     `SELECT TO_CHAR(fecha, 'YYYY-MM-DD') AS fecha, nombre
        FROM dias_feriados
@@ -124,8 +156,30 @@ async function detalleDiasHabiles(inicio, fin, cliente = pool) {
   return detalle;
 }
 
+/**
+ * Primer dia habil posterior a una fecha: el dia en que el empleado se
+ * reincorpora tras sus vacaciones ("Entrada" en el control anual de RRHH).
+ */
+async function siguienteDiaHabil(fecha, cliente = pool) {
+  const desde = aISO(fecha);
+  const tope = isoDeUTC(sumarDias(aUTC(desde), 30));
+  const { rows } = await cliente.query(
+    `SELECT TO_CHAR(fecha, 'YYYY-MM-DD') AS fecha
+       FROM dias_feriados
+      WHERE activo = TRUE AND fecha BETWEEN $1 AND $2`,
+    [desde, tope]
+  );
+  const asuetos = new Set(rows.map((r) => r.fecha));
+  for (let d = sumarDias(aUTC(desde), 1); ; d = sumarDias(d, 1)) {
+    const dow = d.getUTCDay();
+    if (dow === 0 || dow === 6 || asuetos.has(isoDeUTC(d))) continue;
+    return isoDeUTC(d);
+  }
+}
+
 module.exports = {
   aISO, aUTC, isoDeUTC, sumarDias,
+  MAX_DIAS_RANGO, esFechaISO, diasCalendario,
   domingoPascua, asuetosNacionales,
-  contarDiasHabiles, detalleDiasHabiles,
+  contarDiasHabiles, detalleDiasHabiles, siguienteDiaHabil,
 };

@@ -1,9 +1,9 @@
 const router = require('express').Router();
-const { verificarToken, soloAdmin } = require('../middleware/auth.middleware');
+const { verificarToken, soloRRHH } = require('../middleware/auth.middleware');
 const auditoria = require('../services/auditoria');
 
-// El rastro de auditoria es informacion sensible: solo administracion y RRHH.
-router.use(verificarToken, soloAdmin);
+// Bitacora de solo lectura: la consultan administracion y RRHH.
+router.use(verificarToken, soloRRHH);
 
 router.get('/', async (req, res) => {
   try {
@@ -27,7 +27,6 @@ router.get('/', async (req, res) => {
   }
 });
 
-/** Catalogo de acciones, para poblar el filtro de la pantalla. */
 router.get('/acciones', (req, res) => {
   res.json(Object.values(auditoria.ACCIONES));
 });

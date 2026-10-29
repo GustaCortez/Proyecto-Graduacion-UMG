@@ -3,17 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { Bell, Check, CheckCheck, Wifi, WifiOff } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api, { BASE_URL } from '../services/api';
+import { useAuth } from '../context/AuthContext';
+import { useEsMovilAngosto } from '../hooks/useMedia';
 
 /**
- * Campanita de notificaciones en vivo.
- *
- * El canal es SSE (EventSource). Como EventSource no permite mandar cabeceras,
- * no se puede enviar el "Authorization: Bearer": primero se pide un ticket de
- * un solo uso con el token normal y ese ticket abre el canal.
- *
- * Ese ticket se consume al conectar, así que la reconexión automática que trae
- * EventSource siempre fallaría con 401. Por eso se desactiva (se cierra en el
- * onerror) y se reconecta a mano pidiendo un ticket nuevo, con espera creciente.
+ * Canal SSE. EventSource no manda cabeceras, así que se abre con un ticket de
+ * un solo uso pedido antes con el token normal. Como el ticket se consume al
+ * conectar, la reconexión automática de EventSource siempre daría 401: se
+ * desactiva cerrando en onerror y se reconecta a mano con un ticket nuevo.
  */
 const RECONEXION_BASE_MS = 2000;
 const RECONEXION_MAX_MS = 30000;
@@ -31,7 +28,15 @@ export default function Notificaciones() {
   const [noLeidas, setNoLeidas] = useState(0);
   const [abierto, setAbierto] = useState(false);
   const [conectado, setConectado] = useState(false);
+  /**
+   * En teléfonos el panel no puede colgar de la campana (anclado a la derecha se
+   * salía por la izquierda): se fija al ancho de la pantalla, justo debajo de
+   * la barra. La altura de la barra se mide al abrir, no se supone.
+   */
+  const esAngosto = useEsMovilAngosto();
+  const [topPanel, setTopPanel] = useState(56);
 
+  const { usuario } = useAuth();
   const navigate = useNavigate();
   const fuenteRef = useRef(null);
   const reintentoRef = useRef(null);
@@ -45,7 +50,6 @@ export default function Notificaciones() {
       setLista(data.notificaciones);
       setNoLeidas(data.no_leidas);
     } catch {
-      // Silencioso: la campanita no debe romper la pantalla.
     }
   }, []);
 
@@ -75,7 +79,7 @@ export default function Notificaciones() {
 
       fuente.onerror = () => {
         setConectado(false);
-        fuente.close();               // evita el reintento automático, que fallaría por el ticket usado
+        fuente.close();               // el reintento automático fallaría: el ticket ya se usó
         if (!vivoRef.current) return;
         reintentoRef.current = setTimeout(conectar, esperaRef.current);
         esperaRef.current = Math.min(esperaRef.current * 2, RECONEXION_MAX_MS);
@@ -98,7 +102,6 @@ export default function Notificaciones() {
     };
   }, [cargar, conectar]);
 
-  // Cerrar el panel al hacer clic fuera
   useEffect(() => {
     if (!abierto) return;
     const fuera = (e) => { if (cajaRef.current && !cajaRef.current.contains(e.target)) setAbierto(false); };
@@ -122,17 +125,37 @@ export default function Notificaciones() {
     } catch { /* se reintenta al recargar */ }
   };
 
+  /**
+   * El destino depende del rol. RRHH recibe avisos de solicitudes AJENAS, que
+   * nunca aparecen en "Mis Solicitudes": esa pantalla solo lista las propias, y
+   * mandarlos ahí los dejaba frente a una tabla vacía. Su pantalla es
+   * "Solicitudes", que muestra las de todo el personal.
+   *
+   * Se lleva el id para que la lista destaque esa solicitud y no obligue a
+   * buscarla entre todas.
+   */
   const abrirSolicitud = (noti) => {
     if (!noti.leida) marcarLeida(noti.id);
     setAbierto(false);
-    if (noti.id_solicitud) navigate('/mis-solicitudes');
+    if (!noti.id_solicitud) return;
+
+    const esRRHH = ['admin', 'rrhh'].includes(usuario?.rol);
+    navigate(esRRHH ? '/solicitudes' : '/mis-solicitudes',
+             { state: { destacar: noti.id_solicitud } });
   };
 
   return (
     <div style={s.contenedor} ref={cajaRef}>
       <button
         style={s.boton}
-        onClick={() => { setAbierto((v) => !v); if (!abierto) cargar(); }}
+        onClick={() => {
+          if (!abierto) {
+            cargar();
+            const caja = cajaRef.current?.getBoundingClientRect();
+            if (caja) setTopPanel(Math.round(caja.bottom) + 8);
+          }
+          setAbierto((v) => !v);
+        }}
         title={conectado ? 'Notificaciones en vivo' : 'Reconectando...'}
         aria-label={`Notificaciones${noLeidas ? `, ${noLeidas} sin leer` : ''}`}
       >
@@ -141,7 +164,9 @@ export default function Notificaciones() {
       </button>
 
       {abierto && (
-        <div style={s.panel}>
+        <div style={esAngosto
+          ? { ...s.panel, ...s.panelMovil, top: topPanel, maxHeight: `calc(100vh - ${topPanel + 8}px)` }
+          : s.panel}>
           <div style={s.cabecera}>
             <span style={s.titulo}>Notificaciones</span>
             <span style={s.estado} title={conectado ? 'Canal en vivo activo' : 'Sin conexión en vivo'}>
@@ -154,7 +179,7 @@ export default function Notificaciones() {
             )}
           </div>
 
-          <div style={s.lista}>
+          <div style={esAngosto ? { ...s.lista, ...s.listaMovil } : s.lista}>
             {lista.length === 0 && <p style={s.vacio}>No tienes notificaciones.</p>}
             {lista.map((n) => (
               <button
@@ -194,6 +219,11 @@ const s = {
     background: '#fff', borderRadius: '12px', boxShadow: '0 10px 30px rgba(0,0,0,.18)',
     border: '1px solid #e2e8f0', zIndex: 50, overflow: 'hidden',
   },
+  // Teléfono (< 480px): ocupa el ancho de la pantalla con 8px de margen a cada lado.
+  panelMovil: {
+    position: 'fixed', left: 8, right: 8, width: 'auto',
+    display: 'flex', flexDirection: 'column',
+  },
   cabecera: {
     display: 'flex', alignItems: 'center', gap: '.5rem',
     padding: '.75rem 1rem', borderBottom: '1px solid #e2e8f0', background: '#f8fafc',
@@ -205,6 +235,7 @@ const s = {
     fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '.25rem',
   },
   lista: { maxHeight: '380px', overflowY: 'auto' },
+  listaMovil: { maxHeight: 'none', flex: 1, minHeight: 0 },
   vacio: { padding: '1.5rem 1rem', textAlign: 'center', color: '#94a3b8', fontSize: '.85rem' },
   item: {
     display: 'block', width: '100%', textAlign: 'left', background: 'transparent',

@@ -3,13 +3,9 @@ const notif = require('../services/notificaciones');
 const sse = require('../services/sse');
 
 /**
- * Tickets de un solo uso para abrir el canal SSE.
- *
- * El objeto EventSource del navegador no permite mandar cabeceras, asi que no
- * se puede enviar el "Authorization: Bearer". La alternativa habitual es poner
- * el JWT en la URL, pero entonces queda escrito en los logs de acceso (morgan)
- * y en el historial. En su lugar, el cliente pide un ticket con su token normal
- * y lo canjea de inmediato: dura 30 segundos y solo sirve una vez.
+ * Tickets de un solo uso para abrir el canal SSE. EventSource no puede mandar
+ * cabeceras, y poner el JWT en la URL lo dejaria en los logs; el cliente pide
+ * un ticket con su token normal y lo canjea de inmediato (30 s, un solo uso).
  */
 const tickets = new Map(); // ticket -> { id_usuario, expira }
 const VIDA_TICKET_MS = 30 * 1000;
@@ -22,7 +18,6 @@ function limpiarVencidos() {
 }
 setInterval(limpiarVencidos, 60 * 1000).unref();
 
-/** Entrega un ticket al usuario ya autenticado. */
 const emitirTicket = (req, res) => {
   limpiarVencidos();
   const ticket = crypto.randomBytes(24).toString('hex');
@@ -30,7 +25,6 @@ const emitirTicket = (req, res) => {
   res.json({ ticket, expira_en_segundos: VIDA_TICKET_MS / 1000 });
 };
 
-/** Abre el canal de eventos. Consume el ticket. */
 const stream = async (req, res) => {
   const ticket = req.query.ticket;
   const datos = ticket ? tickets.get(ticket) : null;
@@ -53,7 +47,6 @@ const stream = async (req, res) => {
 
   sse.suscribir(idUsuario, res);
 
-  // Estado inicial para que la campanita se pinte apenas conecta.
   try {
     const noLeidas = await notif.contarNoLeidas(idUsuario);
     res.write(`event: conectado\ndata: ${JSON.stringify({ no_leidas: noLeidas })}\n\n`);

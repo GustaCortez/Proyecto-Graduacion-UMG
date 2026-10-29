@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import api from '../../services/api';
-import { Pencil, History, RefreshCw } from 'lucide-react';
+import { Pencil, History, RefreshCw, FileSpreadsheet } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { fechaCorta } from '../../utils/fechas';
 
 export default function Vacaciones() {
   const [vacaciones, setVacaciones] = useState([]);
@@ -10,6 +11,30 @@ export default function Vacaciones() {
   const [seleccionado, setSeleccionado] = useState(null);
   const [form, setForm]             = useState({ dias_disponibles:'', dias_usados:'' });
   const [historial, setHistorial]   = useState(null);
+  const anioActual = new Date().getFullYear();
+  const [anio, setAnio]             = useState(anioActual);
+  const [exportando, setExportando] = useState(false);
+  const [enviando, setEnviando]     = useState(false);
+
+  /** Descarga el control anual en Excel con el formato del libro de RRHH. */
+  const exportarControl = async () => {
+    setExportando(true);
+    try {
+      const { data } = await api.get('/vacaciones/control-anual', { params: { anio }, responseType: 'blob' });
+      const url = URL.createObjectURL(data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `VACACIONES ${anio}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch {
+      toast.error('No se pudo generar el control anual');
+    } finally {
+      setExportando(false);
+    }
+  };
 
   const verHistorial = async (v) => {
     try {
@@ -20,7 +45,7 @@ export default function Vacaciones() {
     }
   };
 
-  /** Regenera los registros del año aplicando el art. 44 b) a cada empleado activo. */
+  /** Regenera los registros del año (art. 44 b) para cada empleado activo. */
   const generarAnio = async () => {
     if (!window.confirm(
       'Se generarán los registros de vacaciones del año en curso para todos los empleados activos, '
@@ -35,9 +60,10 @@ export default function Vacaciones() {
     }
   };
 
-  const cargar = () => api.get('/vacaciones').then(r => setVacaciones(r.data)).catch(() => setVacaciones([]));
+  const cargar = () => api.get('/vacaciones', { params: { anio } })
+    .then(r => setVacaciones(r.data)).catch(() => setVacaciones([]));
 
-  useEffect(() => { cargar(); }, []);
+  useEffect(() => { cargar(); }, [anio]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtrados = vacaciones.filter(v =>
     `${v.nombres} ${v.apellidos}`.toLowerCase().includes(busqueda.toLowerCase()) ||
@@ -52,6 +78,8 @@ export default function Vacaciones() {
 
   const handleGuardar = async e => {
     e.preventDefault();
+    if (enviando) return;
+    setEnviando(true);
     try {
       await api.patch(`/vacaciones/${seleccionado.id}/saldo`, {
         dias_disponibles: Number(form.dias_disponibles),
@@ -62,6 +90,8 @@ export default function Vacaciones() {
       cargar();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Error al actualizar');
+    } finally {
+      setEnviando(false);
     }
   };
 
@@ -76,23 +106,27 @@ export default function Vacaciones() {
       <div style={s.header}>
         <div>
           <h1 style={s.titulo}>Vacaciones</h1>
-          <p style={s.sub}>
-            Saldo de días hábiles por empleado — {new Date().getFullYear()}
-          </p>
         </div>
-        <button style={s.btnGenerar} onClick={generarAnio}>
-          <RefreshCw size={16}/> Generar año
-        </button>
+        <div style={{ display:'flex', gap:'.5rem' }}>
+          <button style={s.btnGenerar} onClick={exportarControl} disabled={exportando}
+            title="Descarga el control anual en Excel (libro, folio, acuerdo, salida y entrada)">
+            <FileSpreadsheet size={16}/> {exportando ? 'Generando...' : `Exportar control ${anio}`}
+          </button>
+          <button style={s.btnGenerar} onClick={generarAnio}>
+            <RefreshCw size={16}/> Generar año
+          </button>
+        </div>
       </div>
 
-      <p style={s.legal}>
-        20 días hábiles después de 1 año de servicio y 25 después de 5 años, no acumulables.
-        Ley de Servicio Municipal (Decreto 1-87), art. 44 inciso b).
-      </p>
-
-      <div style={s.searchBox}>
-        <input style={s.searchInput} placeholder="Buscar empleado..."
+      <div style={{ ...s.searchBox, display:'flex', gap:'.75rem', alignItems:'center' }}>
+        <input style={{ ...s.searchInput, flex:1 }} placeholder="Buscar empleado..."
           value={busqueda} onChange={e => setBusqueda(e.target.value)}/>
+        <select style={s.selectAnio} value={anio} onChange={e => setAnio(Number(e.target.value))}
+          title="Año del periodo de vacaciones">
+          {[anioActual - 2, anioActual - 1, anioActual, anioActual + 1].map(a => (
+            <option key={a} value={a}>{a}</option>
+          ))}
+        </select>
       </div>
 
       <div style={s.tabla}>
@@ -118,13 +152,15 @@ export default function Vacaciones() {
                     {v.saldo ?? '—'} días
                   </span>
                 </td>
-                <td style={{ ...s.td, display:'flex', gap:'.4rem' }}>
-                  <button style={s.btnEdit} onClick={() => abrirEditar(v)} title="Ajustar saldo manualmente">
-                    <Pencil size={15}/>
-                  </button>
-                  <button style={s.btnHist} onClick={() => verHistorial(v)} title="Ver historial de vacaciones">
-                    <History size={15}/>
-                  </button>
+                <td style={s.td}>
+                  <div style={{ display:'flex', gap:'.4rem' }}>
+                    <button style={s.btnEdit} onClick={() => abrirEditar(v)} title="Ajustar saldo manualmente">
+                      <Pencil size={15}/>
+                    </button>
+                    <button style={s.btnHist} onClick={() => verHistorial(v)} title="Ver historial de vacaciones">
+                      <History size={15}/>
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -160,7 +196,9 @@ export default function Vacaciones() {
               </p>
               <div style={{ display:'flex', gap:'1rem', justifyContent:'flex-end' }}>
                 <button type="button" style={s.btnCancelar} onClick={() => setModal(false)}>Cancelar</button>
-                <button type="submit" style={s.btnGuardar}>Guardar</button>
+                <button type="submit" style={{ ...s.btnGuardar, opacity: enviando ? 0.7 : 1 }} disabled={enviando}>
+                  {enviando ? 'Guardando...' : 'Guardar'}
+                </button>
               </div>
             </form>
           </div>
@@ -173,7 +211,7 @@ export default function Vacaciones() {
             <h2 style={s.modalTitle}>Historial de vacaciones</h2>
             <p style={s.histMeta}>
               {historial.empleado.empleado} · {historial.empleado.codigo_empleado} ·
-              ingreso {historial.empleado.fecha_ingreso}<br/>
+              ingreso {fechaCorta(historial.empleado.fecha_ingreso)}<br/>
               {historial.total_periodos} período(s) gozado(s), {historial.total_dias_gozados} día(s) hábiles.
             </p>
 
@@ -190,8 +228,8 @@ export default function Vacaciones() {
                     {historial.historial.map(h => (
                       <tr key={h.id_solicitud}>
                         <td style={s.td}>{h.anio}</td>
-                        <td style={s.td}>{h.fecha_inicio}</td>
-                        <td style={s.td}>{h.fecha_fin}</td>
+                        <td style={s.td}>{fechaCorta(h.fecha_inicio)}</td>
+                        <td style={s.td}>{fechaCorta(h.fecha_fin)}</td>
                         <td style={s.td}>{h.dias_habiles ?? '—'}</td>
                         <td style={s.td}><strong>{h.dias_descontados || 0}</strong></td>
                         <td style={s.td}>
@@ -223,11 +261,11 @@ export default function Vacaciones() {
 const s = {
   header:     { display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'1.5rem' },
   titulo:     { fontSize:'1.5rem', fontWeight:700, color:'#1e3a5f' },
-  sub:        { color:'#64748b' },
+  selectAnio: { border:'1.5px solid #e2e8f0', borderRadius:'8px', padding:'.4rem .6rem', fontSize:'.9rem', background:'#fff' },
   searchBox:  { background:'#fff', border:'1.5px solid #e2e8f0', borderRadius:'10px', padding:'.65rem 1rem', marginBottom:'1rem' },
   searchInput:{ border:'none', outline:'none', width:'100%', fontSize:'.95rem' },
-  tabla:      { background:'#fff', borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 3px rgba(0,0,0,.1)' },
-  tbl:        { width:'100%', borderCollapse:'collapse' },
+  tabla:      { background:'#fff', borderRadius:'12px', overflow:'auto', boxShadow:'0 1px 3px rgba(0,0,0,.1)' },
+  tbl:        { width:'100%', borderCollapse:'collapse', minWidth:'820px' },
   th:         { textAlign:'left', padding:'.75rem 1rem', fontSize:'.8rem', color:'#64748b', background:'#f8fafc', borderBottom:'2px solid #e2e8f0', fontWeight:600 },
   td:         { padding:'.75rem 1rem', fontSize:'.9rem', borderBottom:'1px solid #f1f5f9' },
   code:       { background:'#f1f5f9', padding:'.15rem .5rem', borderRadius:'4px', fontSize:'.82rem' },
@@ -244,6 +282,5 @@ const s = {
   btnHist:    { background:'#f1f5f9', border:'none', borderRadius:'6px', padding:'5px', display:'flex', color:'#475569', cursor:'pointer' },
   btnGenerar: { display:'flex', alignItems:'center', gap:'.4rem', padding:'.6rem 1rem', border:'1.5px solid #e2e8f0',
                 borderRadius:'8px', background:'#fff', color:'#334155', fontWeight:600, cursor:'pointer' },
-  legal:      { fontSize:'.78rem', color:'#94a3b8', marginBottom:'1rem', fontStyle:'italic' },
   histMeta:   { fontSize:'.85rem', color:'#64748b', marginBottom:'1rem' },
 };

@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const { resumenInstitucional } = require('./expediente.controller');
 
 const getDashboard = async (req, res) => {
   try {
@@ -27,17 +28,20 @@ const getDashboard = async (req, res) => {
       });
     }
 
-    const [solicitudes, empleados, recientes] = await Promise.all([
+    const [solicitudes, empleados, recientes, expediente] = await Promise.all([
       pool.query('SELECT * FROM v_dashboard_solicitudes'),
       pool.query(`SELECT COUNT(*) AS total,
                    COUNT(*) FILTER (WHERE estado='Activo') AS activos
                   FROM empleados`),
       pool.query(`SELECT * FROM v_solicitudes ORDER BY creado_en DESC LIMIT 5`),
+      // Avisos IGSS pendientes, evaluaciones faltantes, etc. (migracion 007).
+      resumenInstitucional(),
     ]);
     res.json({
       resumen_solicitudes:   solicitudes.rows,
       total_empleados:       empleados.rows[0],
       solicitudes_recientes: recientes.rows,
+      expediente,
     });
   } catch (err) {
     console.error(err.message);

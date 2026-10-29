@@ -1,7 +1,7 @@
 const router = require('express').Router();
 const {
   getSolicitudes, getSolicitudById,
-  crearSolicitud, actualizarEstado, getTipos, getMisSolicitudes, previsualizarDias,
+  crearSolicitud, actualizarEstado, actualizarActa, getTipos, getMisSolicitudes, previsualizarDias,
 } = require('../controllers/solicitudes.controller');
 const { verificarToken, soloRRHH } = require('../middleware/auth.middleware');
 const docs = require('../controllers/documentos.controller');
@@ -18,8 +18,8 @@ router.get('/dias-habiles', previsualizarDias);
 router.post('/',            crearSolicitud);
 router.get('/:id',          getSolicitudById);
 router.patch('/:id/estado', soloRRHH, actualizarEstado);
+router.patch('/:id/acta',   soloRRHH, actualizarActa);
 
-// Documentos adjuntos (ej. justificante medico)
 router.get('/:id/documentos',             docs.listar);
 router.post('/:id/documentos',            subirDocumento, docs.subir);
 router.get('/:id/documentos/:idDoc',      docs.descargar);

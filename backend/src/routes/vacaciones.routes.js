@@ -8,6 +8,7 @@ router.use(verificarToken);
 router.get('/',          soloRRHH, ctrl.getVacaciones);
 router.get('/mi-saldo',            ctrl.getMiSaldo);
 router.get('/simular',   soloRRHH, ctrl.simular);
+router.get('/control-anual', soloRRHH, ctrl.controlAnual);
 router.post('/generar',  soloRRHH, ctrl.generarAnio);
 
 router.get('/:id_empleado',           ctrl.getVacacionesPorEmpleado);

@@ -3,14 +3,9 @@ import api from '../../services/api';
 import { ChevronLeft, ChevronRight, Eye, ArrowRight, ChevronDown } from 'lucide-react';
 
 /**
- * Rastro de auditoría: qué hizo cada usuario, cuándo, sobre qué registro y
- * desde qué IP.
- *
- * El detalle se guarda como JSON, pero quien consulta esta pantalla es personal
- * de RRHH, no un programador. Por eso se traduce a texto: cada acción tiene un
- * nombre legible, cada campo una etiqueta en español y los cambios de estado se
- * muestran como "antes -> después". El JSON original queda disponible en una
- * sección plegable, por si hace falta revisarlo tal cual quedó guardado.
+ * Rastro de auditoría. El detalle se guarda como JSON, pero quien consulta es
+ * personal de RRHH: aquí se traduce a texto legible y el JSON original queda
+ * en una sección plegable.
  */
 
 const ACCIONES = {
@@ -29,7 +24,6 @@ const ACCIONES = {
   RESET_PASSWORD:    { etiqueta: 'Cambio de contraseña', color: '#7c3aed' },
   CAMBIO_ESTADO:     { etiqueta: 'Cambio de estado',     color: '#6366f1' },
   AJUSTE_VACACIONES: { etiqueta: 'Ajuste de vacaciones', color: '#0891b2' },
-  NOMINA_CREADA:     { etiqueta: 'Nómina registrada',    color: '#065f46' },
   SUBIR_DOCUMENTO:   { etiqueta: 'Documento adjuntado',  color: '#0369a1' },
 };
 
@@ -37,8 +31,35 @@ const accionDe = (a) => ACCIONES[a] || { etiqueta: a, color: '#64748b' };
 
 const TABLAS = {
   usuarios: 'Usuarios', empleados: 'Empleados', solicitudes: 'Solicitudes',
-  vacaciones: 'Vacaciones', notas_pago: 'Nómina', documentos_adjuntos: 'Documentos',
+  vacaciones: 'Vacaciones', documentos_adjuntos: 'Documentos',
   dias_feriados: 'Asuetos', refresh_tokens: 'Sesiones',
+  capacitaciones: 'Capacitaciones', evaluaciones_desempeno: 'Evaluaciones de desempeño',
+  llamadas_atencion: 'Llamadas de atención', bajas_igss: 'Avisos de baja IGSS',
+  expediente_adjuntos: 'Adjuntos del expediente',
+};
+
+/** Frases del expediente (migracion 007), por tabla y accion. */
+const EXPEDIENTE = {
+  capacitaciones: {
+    CREAR:      (q, d, e) => `${q} registró la capacitación "${d.nombre}"${e ? ` a ${e}` : ''}.`,
+    ACTUALIZAR: (q, d, e) => `${q} actualizó la capacitación "${d.nombre}"${e ? ` de ${e}` : ''}.`,
+    ELIMINAR:   (q, d, e) => `${q} eliminó la capacitación "${d.nombre}"${e ? ` de ${e}` : ''}.`,
+  },
+  evaluaciones_desempeno: {
+    CREAR:      (q, d, e) => `${q} registró la evaluación de desempeño del período ${d.periodo}${e ? ` de ${e}` : ''}.`,
+    ACTUALIZAR: (q, d, e) => `${q} corrigió la evaluación del período ${d.periodo}${e ? ` de ${e}` : ''}.`,
+    ELIMINAR:   (q, d, e) => `${q} eliminó la evaluación del período ${d.periodo}${e ? ` de ${e}` : ''}.`,
+  },
+  llamadas_atencion: {
+    CREAR:      (q, d, e) => `${q} registró una llamada de atención ${String(d.tipo || '').toLowerCase()}${e ? ` a ${e}` : ''}.`,
+    ACTUALIZAR: (q, d, e) => `${q} actualizó una llamada de atención${e ? ` de ${e}` : ''}.`,
+    ELIMINAR:   (q, d, e) => `${q} eliminó una llamada de atención${e ? ` de ${e}` : ''}.`,
+  },
+  bajas_igss: {
+    CREAR:      (q, d, e) => `${q} abrió el aviso de baja ante el IGSS${e ? ` de ${e}` : ''} (${d.motivo}).`,
+    ACTUALIZAR: (q, d, e) => `${q} ${d.estado === 'Presentado' ? 'marcó como presentado' : 'actualizó'} el aviso de baja IGSS${e ? ` de ${e}` : ''}.`,
+    ELIMINAR:   (q, d, e) => `${q} eliminó el aviso de baja IGSS${e ? ` de ${e}` : ''}.`,
+  },
 };
 
 const ETIQUETAS = {
@@ -53,6 +74,11 @@ const ETIQUETAS = {
   fecha_ingreso: 'Fecha de ingreso', codigo_empleado: 'Código',
   nombres: 'Nombres', apellidos: 'Apellidos', nombre: 'Nombre',
   bytes: 'Tamaño', mime: 'Tipo de archivo', campo: 'Campo modificado',
+  periodo: 'Período', evaluador: 'Evaluador', institucion: 'Institución', horas: 'Horas',
+  sancion: 'Sanción', tipo_baja: 'Tipo de baja', aviso_igss: 'Aviso IGSS',
+  seccion: 'Sección', id_registro: 'Registro', adjuntos_eliminados: 'Adjuntos eliminados',
+  numero_afiliacion: 'Afiliación IGSS', numero_aviso: 'Número de aviso',
+  fecha_baja: 'Fecha de baja', fecha_aviso: 'Fecha del aviso',
   anio: 'Año', empleados: 'Empleados', nuevos: 'Nuevos', generados: 'Generados',
   activo: 'Activo', telefono: 'Teléfono', correo: 'Correo',
   direccion: 'Dirección', salario_base: 'Salario base', estado: 'Estado',
@@ -67,7 +93,6 @@ const CAMPOS_APARTE = ['estado_anterior', 'estado_nuevo', 'id_empleado'];
 
 const kb = (b) => (b > 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.round(b / 1024)} KB`);
 
-/** Convierte un valor suelto del JSON en algo legible. */
 function valorLegible(clave, valor) {
   if (valor === null || valor === undefined || valor === '') return '—';
   if (typeof valor === 'boolean') return valor ? 'Sí' : 'No';
@@ -76,17 +101,19 @@ function valorLegible(clave, valor) {
   return String(valor);
 }
 
-/** Traduce la IP de loopback, que al usuario no le dice nada. */
+/** Traduce la IP de loopback. */
 const ipLegible = (ip) =>
   ip === '::1' || ip === '127.0.0.1' ? 'Este equipo (local)' : ip || '—';
 
-/** Frase que resume la acción, armada con lo que traiga el detalle. */
 function resumen(r) {
   const d = r.detalle || {};
   const quien = r.responsable || 'Un usuario';
   const empleado = r.empleado_afectado || d.empleado;
   const nombreEmpleado = typeof empleado === 'object' && empleado
     ? `${empleado.nombres} ${empleado.apellidos}` : empleado;
+
+  const exp = EXPEDIENTE[r.tabla];
+  if (exp && exp[r.accion]) return exp[r.accion](quien, d, nombreEmpleado);
 
   switch (r.accion) {
     case 'LOGIN':
@@ -136,10 +163,15 @@ function resumen(r) {
       if (d.campo === 'foto_url') return `${quien} actualizó su foto de perfil.`;
       return `${quien} actualizó el registro #${r.registro_id} de ${TABLAS[r.tabla] || r.tabla}.`;
     case 'BAJA_EMPLEADO':
-      return `${quien} dio de baja a ${nombreEmpleado || `el empleado #${r.registro_id}`}.`;
+      return `${quien} dio de baja a ${nombreEmpleado || `el empleado #${r.registro_id}`}`
+           + `${d.tipo_baja ? ` (${String(d.tipo_baja).toLowerCase()})` : ''}.`
+           + `${d.aviso_igss ? ' Se abrió el aviso de baja ante el IGSS.' : ''}`;
     case 'AJUSTE_VACACIONES':
       return `${quien} ajustó manualmente el saldo de vacaciones de ${d.anio}.`;
     case 'SUBIR_DOCUMENTO':
+      if (d.seccion) {
+        return `${quien} adjuntó "${d.nombre}" al expediente${nombreEmpleado ? ` de ${nombreEmpleado}` : ''}.`;
+      }
       return `${quien} adjuntó el documento "${d.nombre}" a la solicitud #${d.id_solicitud}.`;
     case 'ELIMINAR':
       return `${quien} eliminó "${d.nombre || `el registro #${r.registro_id}`}" `
@@ -190,7 +222,6 @@ export default function Auditoria() {
   const paginas = Math.max(1, Math.ceil(total / LIMITE));
   const fecha = (f) => new Date(f).toLocaleString('es-GT', { dateStyle: 'medium', timeStyle: 'short' });
 
-  /** Campos del detalle que se muestran como lista, ya traducidos. */
   const camposDe = (d) => Object.entries(d || {})
     .filter(([k]) => !CAMPOS_APARTE.includes(k))
     .filter(([, v]) => v !== null && v !== undefined && v !== '');
@@ -294,7 +325,6 @@ export default function Auditoria() {
                 </span></div>
             </div>
 
-            {/* Cambio de estado, destacado aparte */}
             {detalle.detalle?.estado_anterior && detalle.detalle?.estado_nuevo && (
               <div style={s.cambio}>
                 <span style={s.estadoAntes}>{detalle.detalle.estado_anterior}</span>
@@ -303,7 +333,6 @@ export default function Auditoria() {
               </div>
             )}
 
-            {/* Empleado afectado, resuelto a nombre */}
             {detalle.empleado_afectado && (
               <div style={s.fila}>
                 <span style={s.filaEtiqueta}>Empleado</span>
@@ -330,7 +359,6 @@ export default function Auditoria() {
               )
             ))}
 
-            {/* El JSON original queda a mano, pero fuera de la vista por defecto */}
             <button style={s.verJson} onClick={() => setVerJson((v) => !v)}>
               <ChevronDown size={14} style={{ transform: verJson ? 'rotate(180deg)' : 'none' }} />
               {verJson ? 'Ocultar' : 'Ver'} datos técnicos

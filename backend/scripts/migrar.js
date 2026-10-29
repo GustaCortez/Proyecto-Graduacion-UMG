@@ -1,6 +1,14 @@
 /**
- * Ejecuta la migracion 001 y deja los datos consistentes con la
- * Ley de Servicio Municipal (Decreto 1-87), art. 44 inciso b).
+ * Ejecuta la migracion 001, carga los asuetos nacionales y crea los registros
+ * de vacaciones del anio que FALTEN, con los dias que marca la Ley de Servicio
+ * Municipal (Decreto 1-87), art. 44 inciso b).
+ *
+ * Puede volverse a correr: nunca sobrescribe una fila existente de
+ * `vacaciones` (ni dias_asignados ni dias_tomados), asi que respeta los
+ * ajustes manuales de RRHH y los descuentos ya hechos por el sistema. Los
+ * dias tomados solo se reconstruyen para los registros creados en esta misma
+ * corrida, a partir de las solicitudes aprobadas que aun no estan ligadas a
+ * ningun registro (id_vacaciones nulo).
  *
  * Uso:  node scripts/migrar.js         (aplica)
  *       node scripts/migrar.js --seco  (simula, no escribe nada)
@@ -11,6 +19,13 @@ const path = require('path');
 const pool = require('../src/config/db');
 const { asuetosNacionales, contarDiasHabiles } = require('../src/utils/dias');
 const { diasPorAntiguedad, fechaDerecho, ARTICULO } = require('../src/utils/vacaciones');
+
+/** Id del tipo "Vacaciones" resuelto por nombre: el 1 fijo no esta garantizado en todas las bases. */
+async function idTipoVacaciones(cli) {
+  const { rows } = await cli.query(
+    `SELECT id FROM tipos_solicitud WHERE nombre ILIKE 'vacaciones' ORDER BY id LIMIT 1`);
+  return rows[0] ? rows[0].id : null;
+}
 
 const SECO = process.argv.includes('--seco');
 const ANIO_DESDE = 2024;
@@ -24,7 +39,6 @@ const titulo = (t) => log(`\n${'-'.repeat(72)}\n${t}\n${'-'.repeat(72)}`);
   try {
     await cli.query('BEGIN');
 
-    // ---------------------------------------------------------------- 1. DDL
     titulo('1. Estructura (migracion 001)');
     const sql = fs.readFileSync(
       path.join(__dirname, '..', '..', 'database', 'migrations',
@@ -33,7 +47,6 @@ const titulo = (t) => log(`\n${'-'.repeat(72)}\n${t}\n${'-'.repeat(72)}`);
     await cli.query(sql.replace(/^\s*BEGIN;\s*$/m, '').replace(/^\s*COMMIT;\s*$/m, ''));
     log('   Tablas y columnas aplicadas.');
 
-    // -------------------------------------------------------- 2. Asuetos
     titulo(`2. Asuetos nacionales ${ANIO_DESDE}-${ANIO_HASTA}`);
     let nuevos = 0;
     for (let a = ANIO_DESDE; a <= ANIO_HASTA; a++) {
@@ -52,7 +65,6 @@ const titulo = (t) => log(`\n${'-'.repeat(72)}\n${t}\n${'-'.repeat(72)}`);
     log('         Municipalidad cierra completo, agregalos desde RRHH.');
     log('   NOTA: la feria titular de Jalapa debe agregarse como tipo Municipal.');
 
-    // ------------------------------------- 3. Registro anual de vacaciones
     const anioActual = new Date().getFullYear();
     titulo(`3. Vacaciones ${anioActual} segun art. 44 b)`);
     const empleados = await cli.query(
@@ -60,76 +72,98 @@ const titulo = (t) => log(`\n${'-'.repeat(72)}\n${t}\n${'-'.repeat(72)}`);
               TO_CHAR(fecha_ingreso, 'YYYY-MM-DD') AS ingreso, estado
          FROM empleados ORDER BY id`);
 
+    // Solo se crean los registros que faltan. Una fila existente no se toca:
+    // puede traer un ajuste manual de RRHH o descuentos ya hechos por el sistema.
+    const creados = new Set(); // ids de vacaciones creados en ESTA corrida
     const cambios = [];
     for (const e of empleados.rows) {
       const dias = diasPorAntiguedad(e.ingreso, anioActual);
       const desde = dias > 0 ? fechaDerecho(e.ingreso, anioActual) : null;
-      const previo = await cli.query(
-        'SELECT dias_asignados, dias_tomados FROM vacaciones WHERE id_empleado=$1 AND anio=$2',
-        [e.id, anioActual]);
 
-      // dias_tomados se pone en 0 aqui; el paso 4 lo recalcula desde las solicitudes.
-      await cli.query(
+      const r = await cli.query(
         `INSERT INTO vacaciones (id_empleado, anio, dias_asignados, dias_tomados, derecho_desde)
          VALUES ($1,$2,$3,0,$4)
-         ON CONFLICT (id_empleado, anio) DO UPDATE
-           SET dias_asignados = EXCLUDED.dias_asignados,
-               dias_tomados   = 0,
-               derecho_desde  = EXCLUDED.derecho_desde`,
+         ON CONFLICT (id_empleado, anio) DO NOTHING
+         RETURNING id`,
         [e.id, anioActual, dias, desde]);
+      const nuevo = r.rows.length > 0;
+      if (nuevo) creados.add(r.rows[0].id);
 
       cambios.push({
         empleado: e.emp.slice(0, 30), ingreso: e.ingreso, estado: e.estado,
-        antes: previo.rows[0] ? previo.rows[0].dias_asignados : '(sin registro)',
-        ahora: dias, derecho_desde: desde || '(aun no)',
+        resultado: nuevo ? `creado con ${dias} dias` : 'ya existia (se conserva)',
+        derecho_desde: nuevo ? (desde || '(aun no)') : '',
       });
     }
     console.table(cambios);
+    log(`   ${creados.size} registro(s) creado(s); ${empleados.rows.length - creados.size} ya existian.`);
 
-    // ------------------------- 4. Recalcular dias tomados desde solicitudes
-    titulo('4. Dias tomados recalculados desde solicitudes aprobadas');
-    const aprobadas = await cli.query(
-      `SELECT s.id, s.id_empleado, e.nombres || ' ' || e.apellidos AS emp,
-              TO_CHAR(s.fecha_inicio,'YYYY-MM-DD') AS inicio,
-              TO_CHAR(COALESCE(s.fecha_fin, s.fecha_inicio),'YYYY-MM-DD') AS fin,
-              s.dias_solicitados
-         FROM solicitudes s
-         JOIN empleados e ON e.id = s.id_empleado
-        WHERE s.id_tipo = 1 AND s.estado = 'Aprobada'
-          AND EXTRACT(YEAR FROM s.fecha_inicio) = $1
-        ORDER BY s.id`, [anioActual]);
-
+    titulo('4. Dias tomados de los registros nuevos, desde solicitudes aprobadas');
+    const tipoVac = await idTipoVacaciones(cli);
     const detalle = [];
     const avisos = [];
-    for (const s of aprobadas.rows) {
-      const habiles = await contarDiasHabiles(s.inicio, s.fin, cli);
-      const vac = await cli.query(
-        'SELECT id, dias_asignados, dias_tomados FROM vacaciones WHERE id_empleado=$1 AND anio=$2',
-        [s.id_empleado, anioActual]);
-      const v = vac.rows[0];
-      const disponible = v.dias_asignados - v.dias_tomados;
-      const descontar = Math.min(habiles, disponible);
+    if (tipoVac === null) {
+      log('   No existe el tipo de solicitud "Vacaciones"; no hay nada que reconstruir.');
+    } else {
+      // Solo las aprobadas que aun no estan ligadas a un registro de vacaciones:
+      // las que ya tienen id_vacaciones ya fueron descontadas por el sistema.
+      const aprobadas = await cli.query(
+        `SELECT s.id, s.id_empleado, e.nombres || ' ' || e.apellidos AS emp,
+                TO_CHAR(s.fecha_inicio,'YYYY-MM-DD') AS inicio,
+                TO_CHAR(COALESCE(s.fecha_fin, s.fecha_inicio),'YYYY-MM-DD') AS fin,
+                s.dias_solicitados
+           FROM solicitudes s
+           JOIN empleados e ON e.id = s.id_empleado
+          WHERE s.id_tipo = $2 AND s.estado = 'Aprobada'
+            AND s.id_vacaciones IS NULL
+            AND EXTRACT(YEAR FROM s.fecha_inicio) = $1
+          ORDER BY s.id`, [anioActual, tipoVac]);
 
-      if (descontar < habiles) {
-        avisos.push(`Solicitud ${s.id} de ${s.emp}: se aprobaron ${habiles} dias habiles pero solo `
-          + `le corresponden ${v.dias_asignados}. Se descuentan ${descontar}. `
-          + `Fue aprobada sin derecho vigente; la validacion nueva ya no lo permite.`);
+      for (const s of aprobadas.rows) {
+        const vac = await cli.query(
+          'SELECT id, dias_asignados, dias_tomados FROM vacaciones WHERE id_empleado=$1 AND anio=$2',
+          [s.id_empleado, anioActual]);
+        const v = vac.rows[0];
+        if (!v) {
+          avisos.push(`Solicitud ${s.id} de ${s.emp}: el empleado no tiene registro de vacaciones ${anioActual}.`);
+          continue;
+        }
+        if (!creados.has(v.id)) {
+          avisos.push(`Solicitud ${s.id} de ${s.emp}: el registro de vacaciones ya existia y no se modifica. `
+            + `Si corresponde descontarla, ajuste el saldo desde RRHH.`);
+          continue;
+        }
+
+        let habiles;
+        try {
+          habiles = await contarDiasHabiles(s.inicio, s.fin, cli);
+        } catch (e) {
+          avisos.push(`Solicitud ${s.id} de ${s.emp}: ${e.message} No se descuenta.`);
+          continue;
+        }
+        const disponible = v.dias_asignados - v.dias_tomados;
+        const descontar = Math.min(habiles, disponible);
+
+        if (descontar < habiles) {
+          avisos.push(`Solicitud ${s.id} de ${s.emp}: se aprobaron ${habiles} dias habiles pero solo `
+            + `le corresponden ${v.dias_asignados}. Se descuentan ${descontar}. `
+            + `Fue aprobada sin derecho vigente; la validacion nueva ya no lo permite.`);
+        }
+
+        await cli.query(
+          `UPDATE solicitudes SET dias_habiles=$1, dias_descontados=$2, id_vacaciones=$3 WHERE id=$4`,
+          [habiles, descontar, v.id, s.id]);
+        await cli.query(
+          'UPDATE vacaciones SET dias_tomados = dias_tomados + $1 WHERE id = $2',
+          [descontar, v.id]);
+
+        detalle.push({ solicitud: s.id, empleado: s.emp.slice(0, 28), rango: `${s.inicio} a ${s.fin}`,
+          decia: s.dias_solicitados, habiles_reales: habiles, descontados: descontar });
       }
-
-      await cli.query(
-        `UPDATE solicitudes SET dias_habiles=$1, dias_descontados=$2, id_vacaciones=$3 WHERE id=$4`,
-        [habiles, descontar, v.id, s.id]);
-      await cli.query(
-        'UPDATE vacaciones SET dias_tomados = dias_tomados + $1 WHERE id = $2',
-        [descontar, v.id]);
-
-      detalle.push({ solicitud: s.id, empleado: s.emp.slice(0, 28), rango: `${s.inicio} a ${s.fin}`,
-        decia: s.dias_solicitados, habiles_reales: habiles, descontados: descontar });
     }
-    detalle.length ? console.table(detalle) : log('   (no habia solicitudes de vacaciones aprobadas)');
+    detalle.length ? console.table(detalle) : log('   (ninguna solicitud aprobada pendiente de descontar)');
     avisos.forEach((a) => log(`   AVISO: ${a}`));
 
-    // --------------------------------------------------- 5. Saldo resultante
     titulo('5. Saldo final');
     const saldo = await cli.query(
       `SELECT e.nombres || ' ' || e.apellidos AS empleado,

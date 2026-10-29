@@ -1,16 +1,12 @@
 /**
- * Bus de Server-Sent Events.
- *
- * Mantiene las conexiones abiertas por usuario para poder empujarles eventos
- * en el momento en que ocurren, sin que el navegador tenga que preguntar.
- * Se eligio SSE sobre WebSocket porque el flujo aqui es en un solo sentido
- * (servidor -> navegador) y no requiere dependencias adicionales.
+ * Bus de Server-Sent Events: mantiene las conexiones abiertas por usuario.
+ * SSE y no WebSocket porque el flujo es en un solo sentido (servidor -> navegador).
  */
 
 /** Map<id_usuario, Set<res>> */
 const clientes = new Map();
 
-/** Latido periodico: evita que proxys o el navegador corten la conexion por inactividad. */
+/** Latido: evita que proxys o el navegador corten la conexion por inactividad. */
 const INTERVALO_LATIDO_MS = 25000;
 
 function suscribir(idUsuario, res) {
@@ -35,7 +31,6 @@ function suscribir(idUsuario, res) {
   return cerrar;
 }
 
-/** Envia un evento a todas las pestanas abiertas de un usuario. */
 function emitir(idUsuario, evento, datos) {
   const conjunto = clientes.get(Number(idUsuario));
   if (!conjunto || conjunto.size === 0) return 0;
@@ -48,7 +43,6 @@ function emitir(idUsuario, evento, datos) {
   return enviados;
 }
 
-/** Envia a varios usuarios a la vez (por ejemplo, avisar a todo RRHH). */
 function emitirAVarios(idsUsuario, evento, datos) {
   return idsUsuario.reduce((n, id) => n + emitir(id, evento, datos), 0);
 }

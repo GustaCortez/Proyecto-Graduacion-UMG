@@ -12,6 +12,7 @@ export default function Usuarios() {
   const [seleccionado, setSeleccionado] = useState(null);
   const [form, setForm]             = useState(formVacio);
   const [nuevaPwd, setNuevaPwd]     = useState('');
+  const [enviando, setEnviando]     = useState(false);
 
   const cargar = () => api.get('/usuarios').then(r => setUsuarios(r.data)).catch(() => {});
 
@@ -24,6 +25,8 @@ export default function Usuarios() {
 
   const handleCrear = async e => {
     e.preventDefault();
+    if (enviando) return;
+    setEnviando(true);
     try {
       await api.post('/usuarios', form);
       toast.success('Usuario creado');
@@ -32,6 +35,8 @@ export default function Usuarios() {
       cargar();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Error al crear usuario');
+    } finally {
+      setEnviando(false);
     }
   };
 
@@ -47,6 +52,8 @@ export default function Usuarios() {
 
   const handleResetPwd = async e => {
     e.preventDefault();
+    if (enviando) return;
+    setEnviando(true);
     try {
       await api.patch(`/usuarios/${seleccionado.id}/password`, { password: nuevaPwd });
       toast.success('Contraseña actualizada');
@@ -54,6 +61,8 @@ export default function Usuarios() {
       setNuevaPwd('');
     } catch (err) {
       toast.error(err.response?.data?.error || 'Error al actualizar contraseña');
+    } finally {
+      setEnviando(false);
     }
   };
 
@@ -118,7 +127,6 @@ export default function Usuarios() {
         )}
       </div>
 
-      {/* Modal Crear */}
       {modal === 'crear' && (
         <div style={s.overlay}>
           <div style={{ ...s.modal, maxWidth:'460px' }}>
@@ -130,7 +138,7 @@ export default function Usuarios() {
               </div>
               <div style={s.campo}>
                 <label style={s.label}>Contraseña</label>
-                <input name="password" type="password" value={form.password} onChange={handleChange} required style={s.input} placeholder="Mínimo 6 caracteres"/>
+                <input name="password" type="password" value={form.password} onChange={handleChange} required minLength={8} style={s.input} placeholder="Mínimo 8 caracteres, con letras y números"/>
               </div>
               <div style={s.campo}>
                 <label style={s.label}>Rol</label>
@@ -151,14 +159,15 @@ export default function Usuarios() {
               </div>
               <div style={{ display:'flex', gap:'1rem', justifyContent:'flex-end' }}>
                 <button type="button" style={s.btnCancelar} onClick={() => setModal(null)}>Cancelar</button>
-                <button type="submit" style={s.btnGuardar}>Crear usuario</button>
+                <button type="submit" style={{ ...s.btnGuardar, opacity: enviando ? 0.7 : 1 }} disabled={enviando}>
+                  {enviando ? 'Guardando...' : 'Crear usuario'}
+                </button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* Modal Cambiar Contraseña */}
       {modal === 'password' && (
         <div style={s.overlay}>
           <div style={{ ...s.modal, maxWidth:'380px' }}>
@@ -168,7 +177,7 @@ export default function Usuarios() {
               <div style={s.campo}>
                 <label style={s.label}>Nueva contraseña</label>
                 <input type="password" value={nuevaPwd} onChange={e => setNuevaPwd(e.target.value)}
-                  required minLength={6} style={s.input} placeholder="Mínimo 6 caracteres"/>
+                  required minLength={8} style={s.input} placeholder="Mínimo 8 caracteres, con letras y números"/>
               </div>
               <div style={{ display:'flex', gap:'1rem', justifyContent:'flex-end' }}>
                 <button type="button" style={s.btnCancelar} onClick={() => setModal(null)}>Cancelar</button>
@@ -187,8 +196,8 @@ const s = {
   titulo:     { fontSize:'1.5rem', fontWeight:700, color:'#1e3a5f' },
   sub:        { color:'#64748b' },
   btnAdd:     { display:'flex', alignItems:'center', gap:'.5rem', background:'#1e3a5f', color:'#fff', border:'none', borderRadius:'8px', padding:'.75rem 1.25rem', fontWeight:600, fontSize:'.9rem', cursor:'pointer' },
-  tabla:      { background:'#fff', borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 3px rgba(0,0,0,.1)' },
-  tbl:        { width:'100%', borderCollapse:'collapse' },
+  tabla:      { background:'#fff', borderRadius:'12px', overflow:'auto', boxShadow:'0 1px 3px rgba(0,0,0,.1)' },
+  tbl:        { width:'100%', borderCollapse:'collapse', minWidth:'720px' },
   th:         { textAlign:'left', padding:'.75rem 1rem', fontSize:'.8rem', color:'#64748b', background:'#f8fafc', borderBottom:'2px solid #e2e8f0', fontWeight:600 },
   td:         { padding:'.75rem 1rem', fontSize:'.9rem', borderBottom:'1px solid #f1f5f9' },
   code:       { background:'#f1f5f9', padding:'.15rem .5rem', borderRadius:'4px', fontSize:'.82rem' },

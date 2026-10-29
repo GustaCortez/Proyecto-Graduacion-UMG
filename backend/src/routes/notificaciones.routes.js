@@ -2,9 +2,8 @@ const router = require('express').Router();
 const { verificarToken } = require('../middleware/auth.middleware');
 const ctrl = require('../controllers/notificaciones.controller');
 
-// El canal SSE no pasa por verificarToken: el navegador no puede mandar
-// cabeceras en un EventSource. Se autentica con un ticket de un solo uso que
-// se pide antes, ese si con el token normal.
+// El canal SSE no pasa por verificarToken: EventSource no manda cabeceras.
+// Se autentica con el ticket de un solo uso que se pide antes.
 router.get('/stream', ctrl.stream);
 
 router.use(verificarToken);

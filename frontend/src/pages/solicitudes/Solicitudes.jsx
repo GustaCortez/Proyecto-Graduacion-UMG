@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import api from '../../services/api';
-import { FilePlus, CheckCircle, XCircle, Paperclip, Download } from 'lucide-react';
+import { FilePlus, CheckCircle, XCircle, Paperclip, Download, BookOpen } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
+import { fechaCorta } from '../../utils/fechas';
 
 export default function Solicitudes() {
   const { usuario } = useAuth();
@@ -11,47 +13,126 @@ export default function Solicitudes() {
   const [empleados, setEmpleados]     = useState([]);    
   const [modal, setModal]             = useState(false);
   const [filtroEstado, setFiltroEstado] = useState('Pendiente');
+  /**
+   * Id que llega al pulsar una notificación. El filtro arranca en "Pendiente",
+   * así que una solicitud ya resuelta quedaría fuera de la lista justo después
+   * de que el aviso prometiera llevar hasta ella.
+   */
+  const destacada = useLocation().state?.destacar ?? null;
   const [form, setForm]               = useState({
     id_empleado:'', id_tipo:'', fecha_inicio:'', fecha_fin:'', motivo:''
   });
   const [resolucion, setResolucion]   = useState(null); // { sol, estado, comentario }
   const [documentos, setDocumentos]   = useState(null); // { sol, lista }
+  const [acta, setActa]               = useState(null); // { sol, libro, folio, numero_acuerdo }
   const [guardando, setGuardando]     = useState(false);
+  const [enviando, setEnviando]       = useState(false);
 
-  const cargar = () => api.get('/solicitudes').then(r => setSolicitudes(r.data));
+  const cargar = () =>
+    api.get('/solicitudes')
+      .then(r => setSolicitudes(r.data))
+      .catch(() => { setSolicitudes([]); toast.error('No se pudieron cargar las solicitudes'); });
 
   useEffect(() => {
     cargar();
-    api.get('/solicitudes/tipos').then(r => setTipos(r.data));
-    api.get('/empleados').then(r => setEmpleados(r.data));
+    api.get('/solicitudes/tipos')
+      .then(r => setTipos(r.data))
+      .catch(() => { setTipos([]); toast.error('No se pudieron cargar los tipos de solicitud'); });
+    api.get('/empleados')
+      .then(r => setEmpleados(r.data))
+      .catch(() => { setEmpleados([]); toast.error('No se pudieron cargar los empleados'); });
   }, []);
 
-  const handleChange = e => setForm({ ...form, [e.target.name]: e.target.value });
+  /**
+   * Los trámites de documento (constancias, carnet) no son ausencias: el
+   * trabajador sigue asistiendo, así que llevan una sola fecha y cero días.
+   */
+  const tipoElegido = tipos.find(t => String(t.id) === String(form.id_tipo));
+  const esAusencia = tipoElegido ? tipoElegido.es_ausencia !== false : true;
+
+  /**
+   * Cambiar el tipo empieza una solicitud distinta: se limpian fechas y motivo,
+   * porque pertenecen al trámite anterior. El empleado elegido SI se conserva:
+   * es lo primero que selecciona RRHH y no depende del tipo.
+   */
+  const handleChange = e => {
+    const { name, value } = e.target;
+
+    if (name === 'id_tipo') {
+      if (String(value) === String(form.id_tipo)) return;  // misma opción: nada que limpiar
+      setForm({ id_empleado: form.id_empleado, id_tipo: value,
+                fecha_inicio: '', fecha_fin: '', motivo: '' });
+      return;
+    }
+
+    setForm({ ...form, [name]: value });
+  };
+
+  /**
+   * Cerrar debe dejar el formulario vacío: al reabrirlo no deben quedar los
+   * datos de la solicitud anterior.
+   */
+  const cerrarModal = () => {
+    setModal(false);
+    setForm({ id_empleado: '', id_tipo: '', fecha_inicio: '', fecha_fin: '', motivo: '' });
+  };
 
   const handleSubmit = async e => {
     e.preventDefault();
+    if (enviando) return;
+    setEnviando(true);
     try {
       await api.post('/solicitudes', form);
       toast.success('Solicitud creada exitosamente');
-      setModal(false);
+      cerrarModal();
       cargar();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Error al crear solicitud');
+    } finally {
+      setEnviando(false);
     }
   };
 
-  /** Abre el cuadro de resolución para que RRHH deje un comentario razonado. */
-  const resolver = (sol, estado) => setResolucion({ sol, estado, comentario: '' });
+  const resolver = (sol, estado) =>
+    setResolucion({ sol, estado, comentario: '', libro: '', folio: '', numero_acuerdo: '' });
+  const esVacaciones = (sol) => /vacaciones/i.test(sol?.tipo_solicitud || '');
 
-  const confirmarResolucion = async () => {
-    const { sol, estado, comentario } = resolucion;
+  /** Corrige libro, folio y acuerdo de una vacacion ya aprobada. */
+  const abrirActa = (sol) =>
+    setActa({ sol, libro: sol.libro || '', folio: sol.folio || '', numero_acuerdo: sol.numero_acuerdo || '' });
+
+  const guardarActa = async () => {
+    const { sol, libro, folio, numero_acuerdo } = acta;
     setGuardando(true);
     try {
-      const { data } = await api.patch(`/solicitudes/${sol.id}/estado`, {
-        estado, comentario_rrhh: comentario.trim() || null,
+      const { data } = await api.patch(`/solicitudes/${sol.id}/acta`, {
+        libro: libro.trim() || null, folio: folio.trim() || null, numero_acuerdo: numero_acuerdo.trim() || null,
       });
-      // Si eran vacaciones, el backend informa cuántos días se movieron del saldo.
-      toast.success(data.saldo ? `${data.mensaje} ${data.saldo}` : data.mensaje);
+      toast.success(`${data.mensaje} Acuerdo No. ${data.solicitud.numero_acuerdo}.`);
+      setActa(null);
+      cargar();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Error al guardar el acta');
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  const confirmarResolucion = async () => {
+    const { sol, estado, comentario, libro, folio, numero_acuerdo } = resolucion;
+    setGuardando(true);
+    try {
+      const cuerpo = { estado, comentario_rrhh: comentario.trim() || null };
+      if (estado === 'Aprobada' && esVacaciones(sol)) {
+        Object.assign(cuerpo, {
+          libro: libro.trim() || null,
+          folio: folio.trim() || null,
+          numero_acuerdo: numero_acuerdo.trim() || null,
+        });
+      }
+      const { data } = await api.patch(`/solicitudes/${sol.id}/estado`, cuerpo);
+      toast.success([data.mensaje, data.saldo, data.acuerdo && `${data.acuerdo}.`].filter(Boolean).join(' '),
+        { duration: data.acuerdo ? 7000 : 4000 });
       setResolucion(null);
       cargar();
     } catch (err) {
@@ -83,6 +164,10 @@ export default function Solicitudes() {
 
   const colores = { 'Pendiente':'#f59e0b','En revision':'#3b82f6','Aprobada':'#22c55e','Rechazada':'#ef4444','Cancelada':'#94a3b8' };
   const esRRHH  = ['admin','rrhh'].includes(usuario?.rol);
+
+  useEffect(() => {
+    if (destacada) setFiltroEstado('Todas');
+  }, [destacada]);
 
   const ESTADOS = ['Pendiente','En revision','Aprobada','Rechazada','Cancelada','Todas'];
   const solicitudesFiltradas = filtroEstado === 'Todas'
@@ -132,12 +217,13 @@ export default function Solicitudes() {
           </thead>
           <tbody>
             {solicitudesFiltradas.map(sol => (
-              <tr key={sol.id}>
+              <tr key={sol.id}
+                style={sol.id === destacada ? s.filaDestacada : undefined}>
                 <td style={s.td}>{sol.id}</td>
                 <td style={s.td}>{sol.empleado}</td>
                 <td style={s.td}>{sol.tipo_solicitud}</td>
-                <td style={s.td}>{new Date(sol.fecha_inicio).toLocaleDateString('es-GT')}</td>
-                <td style={s.td}>{sol.fecha_fin ? new Date(sol.fecha_fin).toLocaleDateString('es-GT') : '—'}</td>
+                <td style={s.td}>{fechaCorta(sol.fecha_inicio)}</td>
+                <td style={s.td}>{fechaCorta(sol.fecha_fin)}</td>
                 <td style={s.td}>
                   {sol.dias_habiles ?? sol.dias_solicitados ?? '—'}
                   {sol.dias_descontados > 0 && (
@@ -148,6 +234,11 @@ export default function Solicitudes() {
                 </td>
                 <td style={s.td}>
                   <span style={{ ...s.badge, background: colores[sol.estado] }}>{sol.estado}</span>
+                  {sol.numero_acuerdo && (
+                    <div style={s.acuerdo} title={`Libro ${sol.libro || '—'} · Folio ${sol.folio || '—'}`}>
+                      Acuerdo {sol.numero_acuerdo}
+                    </div>
+                  )}
                 </td>
                 <td style={s.td}>
                   <button style={s.btnClip} onClick={() => verDocumentos(sol)}
@@ -166,6 +257,12 @@ export default function Solicitudes() {
                       </button>
                     </div>
                   )}
+                  {esRRHH && sol.estado === 'Aprobada' && esVacaciones(sol) && (
+                    <button style={s.btnActa} onClick={() => abrirActa(sol)}
+                      title="Libro, folio y número de acuerdo">
+                      <BookOpen size={16}/>
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -178,7 +275,6 @@ export default function Solicitudes() {
         )}
       </div>
 
-      {/* Modal */}
       {modal && (
         <div style={s.overlay}>
           <div style={s.modal}>
@@ -202,35 +298,50 @@ export default function Solicitudes() {
                   ))}
                 </select>
               </div>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1rem' }}>
-                <div style={s.campo}>
-                  <label style={s.label}>Fecha inicio</label>
-                  <input name="fecha_inicio" type="date" value={form.fecha_inicio} onChange={handleChange} required style={s.input}/>
-                </div>
-                <div style={s.campo}>
-                  <label style={s.label}>Fecha fin</label>
-                  <input name="fecha_fin" type="date" value={form.fecha_fin} onChange={handleChange} style={s.input}/>
-                </div>
-              </div>
-              <p style={s.pista}>
-                Los días hábiles se calculan automáticamente a partir del rango de fechas,
-                descontando fines de semana y asuetos.
-              </p>
+              {esAusencia ? (
+                <>
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:'1rem' }}>
+                    <div style={s.campo}>
+                      <label style={s.label}>Fecha inicio</label>
+                      <input name="fecha_inicio" type="date" value={form.fecha_inicio} onChange={handleChange} required style={s.input}/>
+                    </div>
+                    <div style={s.campo}>
+                      <label style={s.label}>Fecha fin</label>
+                      <input name="fecha_fin" type="date" value={form.fecha_fin} onChange={handleChange} style={s.input}/>
+                    </div>
+                  </div>
+                  <p style={s.pista}>
+                    Los días hábiles se calculan automáticamente a partir del rango de fechas,
+                    descontando fines de semana y asuetos.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div style={s.campo}>
+                    <label style={s.label}>Fecha de solicitud</label>
+                    <input name="fecha_inicio" type="date" value={form.fecha_inicio} onChange={handleChange} required style={s.input}/>
+                  </div>
+                  <p style={s.pista}>
+                    Este trámite no descuenta días: es un documento que extiende Recursos Humanos.
+                  </p>
+                </>
+              )}
               <div style={s.campo}>
                 <label style={s.label}>Motivo</label>
                 <textarea name="motivo" value={form.motivo} onChange={handleChange} required rows={3}
                   style={{ ...s.input, resize:'vertical' }} placeholder="Describe el motivo de la solicitud..."/>
               </div>
               <div style={{ display:'flex', gap:'1rem', justifyContent:'flex-end' }}>
-                <button type="button" style={s.btnCancelar} onClick={() => setModal(false)}>Cancelar</button>
-                <button type="submit" style={s.btnGuardar}>Crear solicitud</button>
+                <button type="button" style={s.btnCancelar} onClick={cerrarModal}>Cancelar</button>
+                <button type="submit" style={{ ...s.btnGuardar, opacity: enviando ? 0.7 : 1 }} disabled={enviando}>
+                  {enviando ? 'Guardando...' : 'Crear solicitud'}
+                </button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* Resolución: aprobar o rechazar con comentario */}
       {resolucion && (
         <div style={s.overlay} onClick={() => setResolucion(null)}>
           <div style={{ ...s.modal, maxWidth:'440px' }} onClick={e => e.stopPropagation()}>
@@ -239,16 +350,42 @@ export default function Solicitudes() {
             </h2>
             <p style={s.resumen}>
               <strong>{resolucion.sol.empleado}</strong> · {resolucion.sol.tipo_solicitud}<br/>
-              {new Date(resolucion.sol.fecha_inicio).toLocaleDateString('es-GT')}
-              {resolucion.sol.fecha_fin && ` al ${new Date(resolucion.sol.fecha_fin).toLocaleDateString('es-GT')}`}
-              {' · '}{resolucion.sol.dias_habiles ?? resolucion.sol.dias_solicitados ?? '—'} día(s) hábiles
+              {fechaCorta(resolucion.sol.fecha_inicio)}
+              {resolucion.sol.fecha_fin && ` al ${fechaCorta(resolucion.sol.fecha_fin)}`}
+              {/* Sin fecha fin es un tramite de documento: no tiene dias que mostrar. */}
+              {resolucion.sol.fecha_fin &&
+                ` · ${resolucion.sol.dias_habiles ?? resolucion.sol.dias_solicitados ?? '—'} día(s) hábiles`}
             </p>
             <p style={s.motivo}>"{resolucion.sol.motivo}"</p>
 
-            {resolucion.estado === 'Aprobada' && /vacaciones/i.test(resolucion.sol.tipo_solicitud || '') && (
-              <p style={s.avisoSaldo}>
-                Al aprobar se descontarán los días hábiles del saldo de vacaciones del empleado.
-              </p>
+            {resolucion.estado === 'Aprobada' && esVacaciones(resolucion.sol) && (
+              <>
+                <p style={s.avisoSaldo}>
+                  Al aprobar se descontarán los días hábiles del saldo de vacaciones del empleado.
+                </p>
+                <div style={s.filaActa}>
+                  <div style={s.campo}>
+                    <label style={s.label}>Libro</label>
+                    <input style={s.input} maxLength={10} value={resolucion.libro}
+                      onChange={e => setResolucion({ ...resolucion, libro: e.target.value })}/>
+                  </div>
+                  <div style={s.campo}>
+                    <label style={s.label}>Folio</label>
+                    <input style={s.input} maxLength={10} value={resolucion.folio}
+                      onChange={e => setResolucion({ ...resolucion, folio: e.target.value })}/>
+                  </div>
+                  <div style={{ ...s.campo, flex: 1.4 }}>
+                    <label style={s.label}>No. de acuerdo</label>
+                    <input style={s.input} maxLength={20} value={resolucion.numero_acuerdo}
+                      placeholder="Automático (01-2026)"
+                      onChange={e => setResolucion({ ...resolucion, numero_acuerdo: e.target.value })}/>
+                  </div>
+                </div>
+                <p style={s.ayudaActa}>
+                  Datos del acta municipal que autoriza las vacaciones. Si deja el acuerdo vacío,
+                  el sistema asigna el siguiente correlativo del año.
+                </p>
+              </>
             )}
 
             <div style={s.campo}>
@@ -271,7 +408,45 @@ export default function Solicitudes() {
         </div>
       )}
 
-      {/* Documentos de respaldo */}
+      {acta && (
+        <div style={s.overlay} onClick={() => setActa(null)}>
+          <div style={{ ...s.modal, maxWidth:'440px' }} onClick={e => e.stopPropagation()}>
+            <h2 style={s.modalTitle}>Acta de vacaciones</h2>
+            <p style={s.resumen}>
+              <strong>{acta.sol.empleado}</strong><br/>
+              {fechaCorta(acta.sol.fecha_inicio)}
+              {acta.sol.fecha_fin && ` al ${fechaCorta(acta.sol.fecha_fin)}`}
+            </p>
+            <div style={s.filaActa}>
+              <div style={s.campo}>
+                <label style={s.label}>Libro</label>
+                <input style={s.input} maxLength={10} value={acta.libro}
+                  onChange={e => setActa({ ...acta, libro: e.target.value })}/>
+              </div>
+              <div style={s.campo}>
+                <label style={s.label}>Folio</label>
+                <input style={s.input} maxLength={10} value={acta.folio}
+                  onChange={e => setActa({ ...acta, folio: e.target.value })}/>
+              </div>
+              <div style={{ ...s.campo, flex: 1.4 }}>
+                <label style={s.label}>No. de acuerdo</label>
+                <input style={s.input} maxLength={20} value={acta.numero_acuerdo}
+                  placeholder="Automático si queda vacío"
+                  onChange={e => setActa({ ...acta, numero_acuerdo: e.target.value })}/>
+              </div>
+            </div>
+            <p style={s.ayudaActa}>Los cambios quedan registrados en la auditoría.</p>
+            <div style={{ display:'flex', gap:'1rem', justifyContent:'flex-end', marginTop:'1.25rem' }}>
+              <button style={s.btnCancelar} onClick={() => setActa(null)}>Cancelar</button>
+              <button disabled={guardando} onClick={guardarActa}
+                style={{ ...s.btnGuardar, opacity: guardando ? .6 : 1 }}>
+                {guardando ? 'Guardando...' : 'Guardar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {documentos && (
         <div style={s.overlay} onClick={() => setDocumentos(null)}>
           <div style={{ ...s.modal, maxWidth:'440px' }} onClick={e => e.stopPropagation()}>
@@ -313,12 +488,14 @@ const s = {
   filtros:    { display:'flex', gap:'.5rem', flexWrap:'wrap', marginBottom:'1rem' },
   filtroBtn:  { display:'flex', alignItems:'center', gap:'.4rem', padding:'.45rem 1rem', borderRadius:'99px', border:'none', cursor:'pointer', fontSize:'.82rem', transition:'all .15s' },
   filtroCount:{ background:'rgba(255,255,255,0.3)', borderRadius:'99px', padding:'1px 7px', fontSize:'.75rem', fontWeight:700 },
-  tabla:      { background:'#fff', borderRadius:'12px', overflow:'hidden', boxShadow:'0 1px 3px rgba(0,0,0,.1)' },
-  tbl:        { width:'100%', borderCollapse:'collapse' },
+  tabla:      { background:'#fff', borderRadius:'12px', overflow:'auto', boxShadow:'0 1px 3px rgba(0,0,0,.1)' },
+  tbl:        { width:'100%', borderCollapse:'collapse', minWidth:'900px' },
   th:         { textAlign:'left', padding:'.75rem 1rem', fontSize:'.8rem', color:'#64748b', background:'#f8fafc', borderBottom:'2px solid #e2e8f0', fontWeight:600 },
   td:         { padding:'.75rem 1rem', fontSize:'.9rem', borderBottom:'1px solid #f1f5f9' },
   badge:      { padding:'.25rem .75rem', borderRadius:'99px', fontSize:'.75rem', color:'#fff', fontWeight:500 },
+  filaDestacada: { background:'#fffbeb', boxShadow:'inset 3px 0 0 #f59e0b' },
   btnAprobar: { background:'#dcfce7', border:'none', borderRadius:'6px', padding:'4px', display:'flex', color:'#16a34a' },
+  btnActa:    { background:'#eef2ff', border:'none', borderRadius:'6px', padding:'4px', display:'flex', color:'#4338ca', cursor:'pointer' },
   btnRechazar:{ background:'#fee2e2', border:'none', borderRadius:'6px', padding:'4px', display:'flex', color:'#dc2626' },
   overlay:    { position:'fixed', inset:0, background:'rgba(0,0,0,.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000, padding:'1rem' },
   modal:      { background:'#fff', borderRadius:'16px', padding:'2rem', width:'100%', maxWidth:'500px', maxHeight:'90vh', overflowY:'auto' },
@@ -338,6 +515,9 @@ const s = {
   resumen:    { fontSize:'.85rem', color:'#64748b', marginBottom:'.75rem', lineHeight:1.5 },
   motivo:     { fontSize:'.85rem', color:'#334155', fontStyle:'italic', background:'#f8fafc',
                 padding:'.6rem .8rem', borderRadius:'8px', marginBottom:'1rem' },
+  filaActa:   { display:'flex', gap:'.75rem', marginBottom:'.5rem' },
+  ayudaActa:  { fontSize:'.75rem', color:'#64748b', margin:'0 0 1rem' },
+  acuerdo:    { fontSize:'.72rem', color:'#475569', marginTop:'.25rem', whiteSpace:'nowrap' },
   avisoSaldo: { fontSize:'.8rem', color:'#0f766e', background:'#f0fdfa', border:'1.5px solid #99f6e4',
                 borderRadius:'8px', padding:'.6rem .8rem', marginBottom:'1rem' },
   docFila:    { display:'flex', alignItems:'center', gap:'.6rem', padding:'.6rem 0',

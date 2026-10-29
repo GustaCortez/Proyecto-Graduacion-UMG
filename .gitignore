@@ -55,3 +55,6 @@ schema_raw.json
 
 # Archivos subidos por los usuarios (documentos y fotos)
 backend/uploads/
+
+# Cobertura de pruebas del backend (jest --coverage)
+backend/coverage/

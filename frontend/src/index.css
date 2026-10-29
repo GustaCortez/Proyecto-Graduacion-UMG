@@ -4,6 +4,9 @@ body {
   font-family: 'Segoe UI', system-ui, sans-serif;
   background: #f1f5f9;
   color: #1e293b;
+  /* Una tabla ancha debe desplazarse dentro de su tarjeta, nunca mover la
+     página entera de lado. */
+  overflow-x: hidden;
 }
 
 :root {
@@ -23,3 +26,58 @@ body {
 a { text-decoration: none; color: inherit; }
 button { cursor: pointer; font-family: inherit; }
 input, select, textarea { font-family: inherit; }
+
+/* Las imágenes nunca desbordan su contenedor. */
+img { max-width: 100%; }
+
+/*
+ * Botón de cerrar sesión, con el aspecto del botón de apagado de Windows:
+ * redondo, discreto, y se tiñe de rojo al apuntarlo para advertir que la acción
+ * termina la sesión. Va en CSS y no en estilos en línea porque necesita :hover
+ * y :focus-visible, que no existen en un objeto de estilos de React.
+ */
+.btn-apagado {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #94b8e0;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+
+.btn-apagado:hover {
+  background: #dc2626;
+  color: #fff;
+}
+
+.btn-apagado:active {
+  background: #b91c1c;
+}
+
+/* Visible al navegar con el teclado, invisible al usar el ratón. */
+.btn-apagado:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* Desplazamiento suave de las tablas en pantallas táctiles. */
+[style*="overflow"] { -webkit-overflow-scrolling: touch; }
+
+@media (max-width: 768px) {
+  /* Safari en iPhone hace zoom al enfocar un campo con letra menor a 16px, y
+     al hacerlo descuadra toda la pantalla. */
+  input, select, textarea { font-size: 16px; }
+
+  /* Los encabezados de página pesan demasiado en un teléfono. */
+  h1 { font-size: 1.25rem; }
+  h2 { font-size: 1.05rem; }
+
+  /* Objetivo táctil mínimo recomendado. */
+  button { min-height: 36px; }
+}

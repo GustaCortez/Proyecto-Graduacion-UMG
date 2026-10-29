@@ -1,11 +1,8 @@
 import { useEffect, useState } from 'react';
 import api from '../../services/api';
 import { AlertCircle } from 'lucide-react';
+import { fechaCorta } from '../../utils/fechas';
 
-/**
- * Vista del empleado sobre sus propias vacaciones: saldo del año, historial
- * de períodos gozados y la base legal del cálculo.
- */
 export default function MisVacaciones() {
   const [saldo, setSaldo]         = useState(null);
   const [historial, setHistorial] = useState(null);
@@ -43,11 +40,10 @@ export default function MisVacaciones() {
       <div style={s.header}>
         <div>
           <h1 style={s.titulo}>Mis Vacaciones</h1>
-          <p style={s.sub}>Saldo y períodos gozados — {saldo.anio}</p>
+          
         </div>
       </div>
 
-      {/* Tarjetas de saldo */}
       <div style={s.tarjetas}>
         <div style={{ ...s.tarjeta, borderTop: '3px solid #0d9488' }}>
           <span style={s.tarjetaNum}>{saldo.dias_asignados}</span>
@@ -65,7 +61,6 @@ export default function MisVacaciones() {
         </div>
       </div>
 
-      {/* Explicación legal del cálculo */}
       <div style={{ ...s.legal, background: sinDerecho ? '#fef3c7' : '#f0fdfa',
                     borderColor: sinDerecho ? '#fcd34d' : '#99f6e4' }}>
         <AlertCircle size={16} color={sinDerecho ? '#b45309' : '#0d9488'} style={{ flexShrink: 0, marginTop: 2 }} />
@@ -79,7 +74,6 @@ export default function MisVacaciones() {
         </div>
       </div>
 
-      {/* Historial de períodos */}
       <h2 style={s.subtitulo}>Historial de vacaciones</h2>
       {historial?.historial?.length === 0 ? (
         <p style={s.vacio}>Todavía no tiene períodos de vacaciones registrados.</p>
@@ -97,8 +91,8 @@ export default function MisVacaciones() {
               {historial.historial.map((h) => (
                 <tr key={h.id_solicitud}>
                   <td style={s.td}>{h.anio}</td>
-                  <td style={s.td}>{h.fecha_inicio}</td>
-                  <td style={s.td}>{h.fecha_fin}</td>
+                  <td style={s.td}>{fechaCorta(h.fecha_inicio)}</td>
+                  <td style={s.td}>{fechaCorta(h.fecha_fin)}</td>
                   <td style={s.td}>{h.dias_habiles ?? '—'}</td>
                   <td style={s.td}><strong>{h.dias_descontados || 0}</strong></td>
                   <td style={s.td}>
@@ -118,7 +112,6 @@ export default function MisVacaciones() {
         </p>
       )}
 
-      {/* Saldos por año */}
       {anios.length > 1 && (
         <>
           <h2 style={s.subtitulo}>Saldos por año</h2>
@@ -152,7 +145,6 @@ const s = {
   cargando:   { color:'#64748b' },
   header:     { marginBottom:'1.5rem' },
   titulo:     { fontSize:'1.5rem', fontWeight:700, color:'#1e3a5f' },
-  sub:        { color:'#64748b' },
   subtitulo:  { fontSize:'1.05rem', fontWeight:700, color:'#1e3a5f', margin:'1.75rem 0 .75rem' },
   tarjetas:   { display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))', gap:'1rem' },
   tarjeta:    { background:'#fff', borderRadius:'12px', padding:'1.25rem', display:'flex',
