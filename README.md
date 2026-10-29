@@ -525,16 +525,17 @@ que elige el proveedor según el entorno:
   Municipalidad. En Render el disco es efímero: cada despliegue o reinicio
   borra la carpeta y los archivos se pierden aunque el registro siga en la base.
 - **S3 compatible** (recomendado en la nube): se activa con solo definir
-  `STORAGE_S3_BUCKET`. Funciona con Cloudflare R2 (10 GB gratis), Supabase
-  Storage, Backblaze B2 o AWS S3. Variables:
+  `STORAGE_S3_BUCKET`. Funciona con Neon Object Storage (el bucket se crea junto
+  con la base de datos), Cloudflare R2, Supabase Storage, Backblaze B2 o AWS S3.
+  Variables:
 
 | Variable | Valor |
 |----------|-------|
 | `STORAGE_S3_BUCKET` | Nombre del bucket; su sola presencia activa S3 |
-| `STORAGE_S3_ENDPOINT` | R2: `https://<cuenta>.r2.cloudflarestorage.com`; Supabase: `https://<proyecto>.supabase.co/storage/v1/s3`; vacío en AWS |
+| `STORAGE_S3_ENDPOINT` | Neon: `https://<rama>.storage.<region>.aws.neon.tech` (lo muestra Connect → Storage); R2: `https://<cuenta>.r2.cloudflarestorage.com`; vacío en AWS |
 | `STORAGE_S3_REGION` | `auto` en R2; la región real en AWS o B2 |
 | `STORAGE_S3_ACCESS_KEY` / `STORAGE_S3_SECRET_KEY` | Credenciales del bucket |
-| `STORAGE_S3_FORCE_PATH_STYLE` | `1` solo para Supabase o MinIO |
+| `STORAGE_S3_FORCE_PATH_STYLE` | `1` para Neon Object Storage, Supabase o MinIO |
 
 Al arrancar, la API imprime qué proveedor quedó activo.
 
